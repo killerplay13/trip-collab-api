@@ -1,0 +1,168 @@
+package com.killerplay13.tripcollab.web;
+
+import com.killerplay13.tripcollab.domain.ItineraryItem;
+import com.killerplay13.tripcollab.service.ItineraryService;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+import java.util.UUID;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/trips/{tripId}/itinerary")
+public class ItineraryController {
+
+  private final ItineraryService service;
+
+  public ItineraryController(ItineraryService service) {
+    this.service = service;
+  }
+
+  @GetMapping
+  public List<ItineraryItemResponse> list(
+      @PathVariable UUID tripId,
+      @RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
+  ) {
+    return service.list(tripId, date).stream().map(ItineraryController::toResponse).toList();
+  }
+
+  @PostMapping
+  public ItineraryItemResponse create(
+      @PathVariable UUID tripId,
+      @RequestBody CreateItineraryItemRequest req
+  ) {
+    ItineraryItem item = service.create(tripId, new ItineraryService.CreateItineraryItemCommand(
+        req.dayDate(), req.title(), req.startTime(), req.endTime(),
+        req.locationName(), req.mapUrl(), req.note(), req.sortOrder()
+    ));
+    return toResponse(item);
+  }
+
+  @PatchMapping("/{itemId}")
+  public ItineraryItemResponse patch(
+      @PathVariable UUID tripId,
+      @PathVariable UUID itemId,
+      @RequestBody PatchItineraryItemRequest req
+  ) {
+    ItineraryItem item = service.patch(tripId, itemId, new ItineraryService.PatchItineraryItemCommand(
+        req.dayDate(), req.title(), req.startTime(), req.endTime(),
+        req.locationName(), req.mapUrl(), req.note(), req.sortOrder()
+    ));
+    return toResponse(item);
+  }
+
+  @DeleteMapping("/{itemId}")
+  public void delete(@PathVariable UUID tripId, @PathVariable UUID itemId) {
+    service.delete(tripId, itemId);
+  }
+
+  @PutMapping("/reorder")
+public void reorder(
+    @PathVariable UUID tripId,
+    @RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+    @RequestBody List<ReorderIdOnly> items
+) {
+  service.reorder(tripId, date, items.stream()
+      .map(i -> new ItineraryService.ReorderItem(i.id(), 0)) // sortOrder 不用，service 會壓縮
+      .toList());
+}
+
+@GetMapping("/all")
+public List<ItineraryDayGroupResponse> listAll(
+    @PathVariable UUID tripId,
+    @RequestParam(value = "from", required = false)
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    LocalDate from,
+    @RequestParam(value = "to", required = false)
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    LocalDate to
+) {
+  return service.listAllGrouped(tripId, from, to).stream()
+      .map(g -> new ItineraryDayGroupResponse(
+          g.dayDate(),
+          g.items().stream().map(ItineraryController::toResponse).toList()
+      ))
+      .toList();
+}
+
+public record ItineraryDayGroupResponse(
+    LocalDate dayDate,
+    List<ItineraryItemResponse> items
+) {}
+
+
+public record ReorderIdOnly(@NotNull UUID id) {}
+
+
+  @PostMapping("/{itemId}/move")
+    public ItineraryItemResponse move(
+        @PathVariable UUID tripId,
+        @PathVariable UUID itemId,
+        @RequestBody MoveRequest req
+    ) {
+    ItineraryItem item = service.moveToDate(tripId, itemId, req.toDate());
+    return toResponse(item);
+    }
+
+public record MoveRequest(@NotNull LocalDate toDate) {}
+
+
+  private static ItineraryItemResponse toResponse(ItineraryItem i) {
+    return new ItineraryItemResponse(
+        i.getId(),
+        i.getTripId(),
+        i.getDayDate(),
+        i.getStartTime(),
+        i.getEndTime(),
+        i.getTitle(),
+        i.getLocationName(),
+        i.getMapUrl(),
+        i.getNote(),
+        i.getSortOrder(),
+        i.getCreatedAt(),
+        i.getUpdatedAt()
+    );
+  }
+
+  public record CreateItineraryItemRequest(
+      @NotNull LocalDate dayDate,
+      @NotBlank String title,
+      LocalTime startTime,
+      LocalTime endTime,
+      String locationName,
+      String mapUrl,
+      String note,
+      Integer sortOrder
+  ) {}
+
+  public record PatchItineraryItemRequest(
+      LocalDate dayDate,
+      String title,
+      LocalTime startTime,
+      LocalTime endTime,
+      String locationName,
+      String mapUrl,
+      String note,
+      Integer sortOrder
+  ) {}
+
+  public record ReorderRequestItem(@NotNull UUID id, int sortOrder) {}
+
+  public record ItineraryItemResponse(
+      UUID id,
+      UUID tripId,
+      LocalDate dayDate,
+      LocalTime startTime,
+      LocalTime endTime,
+      String title,
+      String locationName,
+      String mapUrl,
+      String note,
+      int sortOrder,
+      java.time.Instant createdAt,
+      java.time.Instant updatedAt
+  ) {}
+}
