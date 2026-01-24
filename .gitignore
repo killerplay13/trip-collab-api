@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+._*
+
+# Build outputs
+target/
+*.class
+*.jar
+*.war
+*.ear
+
+# Logs
+*.log
+logs/
+hs_err_pid*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Env
+.env
+.env.*
+
+# Artifacts in this repo
+trip-collab-api.zip
