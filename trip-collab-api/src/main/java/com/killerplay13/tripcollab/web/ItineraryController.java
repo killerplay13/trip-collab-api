@@ -60,7 +60,7 @@ public class ItineraryController {
   }
 
   @PutMapping("/reorder")
-public void reorder(
+  public void reorder(
     @PathVariable UUID tripId,
     @RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
     @RequestBody List<ReorderIdOnly> items
