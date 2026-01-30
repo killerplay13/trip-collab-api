@@ -123,21 +123,21 @@ public void reorder(UUID tripId, LocalDate dayDate, List<ReorderItem> items) {
   }
 
   @Transactional(readOnly = true)
-public List<DayGroup> listAllGrouped(UUID tripId, LocalDate from, LocalDate to) {
-  List<ItineraryItem> rows;
+  public List<DayGroup> listAllGrouped(UUID tripId, LocalDate from, LocalDate to) {
+    List<ItineraryItem> rows;
 
-  if (from == null && to == null) {
-  rows = repo.findAllByTrip(tripId);
-} else if (from != null && to == null) {
-  rows = repo.findAllByTripFrom(tripId, from);
-} else if (from != null) {
-  rows = repo.findAllByTripInRange(tripId, from, to);
-} else {
-  throw new ResponseStatusException(
-      HttpStatus.BAD_REQUEST,
-      "from is required when to is provided"
-  );
-}
+    if (from == null && to == null) {
+    rows = repo.findAllByTrip(tripId);
+  } else if (from != null && to == null) {
+    rows = repo.findAllByTripFrom(tripId, from);
+  } else if (from != null) {
+    rows = repo.findAllByTripInRange(tripId, from, to);
+  } else {
+    throw new ResponseStatusException(
+        HttpStatus.BAD_REQUEST,
+        "from is required when to is provided"
+    );
+  }
 
 
   var map = new java.util.LinkedHashMap<java.time.LocalDate, java.util.List<ItineraryItem>>();
@@ -150,10 +150,10 @@ public List<DayGroup> listAllGrouped(UUID tripId, LocalDate from, LocalDate to) 
     result.add(new DayGroup(e.getKey(), e.getValue()));
   }
   return result;
-}
+ }
 
 
-public record DayGroup(LocalDate dayDate, List<ItineraryItem> items) {}
+ public record DayGroup(LocalDate dayDate, List<ItineraryItem> items) {}
 
 
 
@@ -180,4 +180,16 @@ public record DayGroup(LocalDate dayDate, List<ItineraryItem> items) {}
   ) {}
 
   public record ReorderItem(UUID id, int sortOrder) {}
+
+  @Transactional(readOnly = true)
+  public List<ItineraryItem> search(UUID tripId, String q, Integer limit) {
+  String keyword = (q == null) ? "" : q.trim();
+  if (keyword.isEmpty()) {
+    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "q is required");
+  }
+
+  int lim = (limit == null) ? 50 : Math.min(Math.max(limit, 1), 200);
+  return repo.searchInTrip(tripId, keyword, lim);
+}
+
 }

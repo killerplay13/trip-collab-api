@@ -107,6 +107,18 @@ public record ReorderIdOnly(@NotNull UUID id) {}
     return toResponse(item);
     }
 
+    @GetMapping("/search")
+    public List<ItineraryItemResponse> search(
+        @PathVariable UUID tripId,
+        @RequestParam("q") String q,
+        @RequestParam(value = "limit", required = false) Integer limit
+    ) {
+      return service.search(tripId, q, limit).stream()
+          .map(ItineraryController::toResponse)
+          .toList();
+    }
+
+
 public record MoveRequest(@NotNull LocalDate toDate) {}
 
 

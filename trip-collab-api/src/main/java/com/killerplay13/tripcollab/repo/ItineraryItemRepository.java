@@ -60,4 +60,25 @@ int updateSortOrder(@Param("tripId") UUID tripId, @Param("id") UUID id, @Param("
       @Param("from") LocalDate from,
       @Param("to") LocalDate to
   );
+
+  @Query(
+  value = """
+    select *
+    from itinerary_items
+    where trip_id = :tripId
+      and (
+        title ilike '%' || :q || '%'
+        or coalesce(location_name,'') ilike '%' || :q || '%'
+        or coalesce(note,'') ilike '%' || :q || '%'
+      )
+    order by day_date asc, sort_order asc, start_time asc nulls last, created_at asc
+    limit :limit
+  """,
+  nativeQuery = true
+)
+List<ItineraryItem> searchInTrip(
+    @Param("tripId") UUID tripId,
+    @Param("q") String q,
+    @Param("limit") int limit
+);
 }
