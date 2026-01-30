@@ -118,8 +118,86 @@ public record ReorderIdOnly(@NotNull UUID id) {}
           .toList();
     }
 
+    @PostMapping("/bulk")
+    public List<ItineraryItemResponse> bulkCreate(
+            @PathVariable UUID tripId,
+            @RequestBody BulkCreateRequest req
+    ) {
+      var created = service.bulkCreate(tripId, req.dayDate(), req.items());
+      return created.stream().map(ItineraryController::toResponse).toList();
+    }
 
-public record MoveRequest(@NotNull LocalDate toDate) {}
+  public record BulkCreateRequest(
+          @NotNull LocalDate dayDate,
+          @NotNull List<BulkItem> items
+  ) {}
+
+  public record BulkItem(
+          String startTime,
+          String endTime,
+          @NotBlank String title,
+          String locationName,
+          String mapUrl,
+          String note
+  ) {}
+
+  @PostMapping("/paste")
+  public List<ItineraryItemResponse> paste(
+          @PathVariable UUID tripId,
+          @RequestBody PasteRequest req
+  ) {
+    var created = service.pasteToBulk(tripId, req.dayDate(), req.text());
+    return created.stream().map(ItineraryController::toResponse).toList();
+  }
+
+  public record PasteRequest(
+          @NotNull LocalDate dayDate,
+          @NotBlank String text
+  ) {}
+
+  @PostMapping("/paste/preview")
+  public ItineraryService.PastePreviewResult pastePreview(
+          @PathVariable UUID tripId,
+          @RequestBody PastePreviewRequest req
+  ) {
+    return service.previewPaste(req.text());
+  }
+
+  public record PastePreviewRequest(String text) {}
+
+
+  @PutMapping("/{itemId}")
+  public ItineraryItemResponse update(
+          @PathVariable UUID tripId,
+          @PathVariable UUID itemId,
+          @RequestBody UpdateItineraryRequest req
+  ) {
+    var cmd = new ItineraryService.UpdateCmd();
+    cmd.dayDate = req.dayDate();
+    cmd.startTime = req.startTime();
+    cmd.endTime = req.endTime();
+    cmd.title = req.title();
+    cmd.locationName = req.locationName();
+    cmd.mapUrl = req.mapUrl();
+    cmd.note = req.note();
+
+    var updated = service.updateItem(tripId, itemId, cmd);
+    return toResponse(updated);
+  }
+
+  public record UpdateItineraryRequest(
+          java.time.LocalDate dayDate,
+          java.time.LocalTime startTime,
+          java.time.LocalTime endTime,
+          String title,
+          String locationName,
+          String mapUrl,
+          String note
+  ) {}
+
+
+
+  public record MoveRequest(@NotNull LocalDate toDate) {}
 
 
   private static ItineraryItemResponse toResponse(ItineraryItem i) {

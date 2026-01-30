@@ -71,14 +71,18 @@ int updateSortOrder(@Param("tripId") UUID tripId, @Param("id") UUID id, @Param("
         or coalesce(location_name,'') ilike '%' || :q || '%'
         or coalesce(note,'') ilike '%' || :q || '%'
       )
-    order by day_date asc, sort_order asc, start_time asc nulls last, created_at asc
+    order by day_date asc, sort_order asc, start_time asc nulls last, created_at asc , id asc                                                                                             
     limit :limit
   """,
   nativeQuery = true
 )
+
 List<ItineraryItem> searchInTrip(
     @Param("tripId") UUID tripId,
     @Param("q") String q,
     @Param("limit") int limit
 );
+
+  long countByTripIdAndDayDate(UUID tripId, LocalDate dayDate);
+
 }
