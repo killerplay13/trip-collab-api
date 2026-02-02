@@ -6,6 +6,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -39,20 +40,20 @@ public class TripTokenFilter extends OncePerRequestFilter {
 
     String token = request.getHeader("X-Trip-Token");
     if (token == null || token.isBlank()) {
-      response.sendError(401, "Missing X-Trip-Token");
+      writeJsonError(request, response, 401, "Missing X-Trip-Token");
       return;
     }
 
     UUID tripId = extractTripId(request.getRequestURI());
     if (tripId == null) {
-      response.sendError(400, "Invalid trip id");
+      writeJsonError(request, response, 400, "Invalid trip id");
       return;
     }
 
     String tokenHash = TripTokenUtil.sha256Hex(token.trim());
     boolean ok = tripRepository.existsByIdAndInviteTokenHashAndInviteEnabledTrue(tripId, tokenHash);
     if (!ok) {
-      response.sendError(401, "Invalid trip token");
+      writeJsonError(request, response, 401, "Invalid trip token");
       return;
     }
 
@@ -68,5 +69,43 @@ public class TripTokenFilter extends OncePerRequestFilter {
     } catch (IllegalArgumentException e) {
       return null;
     }
+  }
+
+  private void writeJsonError(HttpServletRequest req, HttpServletResponse res, int status, String message)
+      throws IOException {
+    res.setStatus(status);
+    res.setContentType("application/json; charset=UTF-8");
+
+    String error = status == 401 ? "Unauthorized" : "Bad Request";
+    String path = req.getRequestURI();
+    String timestamp = Instant.now().toString();
+
+    String body =
+        "{"
+            + "\"status\":" + status + ","
+            + "\"error\":\"" + escapeJson(error) + "\","
+            + "\"message\":\"" + escapeJson(message) + "\","
+            + "\"path\":\"" + escapeJson(path) + "\","
+            + "\"timestamp\":\"" + escapeJson(timestamp) + "\""
+            + "}";
+
+    res.getWriter().write(body);
+  }
+
+  private String escapeJson(String value) {
+    if (value == null) return "";
+    StringBuilder sb = new StringBuilder(value.length() + 16);
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      switch (c) {
+        case '\\' -> sb.append("\\\\");
+        case '"' -> sb.append("\\\"");
+        case '\n' -> sb.append("\\n");
+        case '\r' -> sb.append("\\r");
+        case '\t' -> sb.append("\\t");
+        default -> sb.append(c);
+      }
+    }
+    return sb.toString();
   }
 }

@@ -1,6 +1,7 @@
 package com.killerplay13.tripcollab.web;
 
 import com.killerplay13.tripcollab.domain.TripMemberEntity;
+import com.killerplay13.tripcollab.repo.TripMemberRepository;
 import com.killerplay13.tripcollab.service.TripMemberService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +16,7 @@ import java.util.UUID;
 public class TripMemberController {
 
     private final TripMemberService tripMemberService;
+    private final TripMemberRepository tripMemberRepository;
 
     // ---------- DTOs ----------
     public record MemberResponse(
@@ -38,7 +40,10 @@ public class TripMemberController {
     // ---------- Endpoints ----------
     @GetMapping
     public List<MemberResponse> list(@PathVariable UUID tripId) {
-        return tripMemberService.listActive(tripId).stream().map(MemberResponse::from).toList();
+        return tripMemberRepository.findByTripIdAndIsActiveTrueOrderByJoinedAtAsc(tripId)
+                .stream()
+                .map(MemberResponse::from)
+                .toList();
     }
 
     @PostMapping

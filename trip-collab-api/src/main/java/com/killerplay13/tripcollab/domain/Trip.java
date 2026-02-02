@@ -53,6 +53,11 @@ public class Trip {
     this.updatedAt = Instant.now();
   }
 
+
+  @Column(name = "currency", nullable = false, length = 3)
+  private String currency = "TWD";
+
+
   // getters/setters (先手寫，或你有 Lombok 就用 @Getter/@Setter)
   public UUID getId() { return id; }
   public void setId(UUID id) { this.id = id; }
@@ -80,5 +85,8 @@ public class Trip {
 
   public Instant getCreatedAt() { return createdAt; }
   public Instant getUpdatedAt() { return updatedAt; }
+
+  public String getCurrency() { return currency; }
+  public void setCurrency(String currency) { this.currency = currency; }
 }
 

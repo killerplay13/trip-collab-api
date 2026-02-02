@@ -20,6 +20,13 @@ public class ExpenseController {
     // ---------- DTOs ----------
     public record MemberAmount(UUID memberId, BigDecimal amount) {}
 
+    public record OriginalMoney(
+            BigDecimal amount,
+            String currency,
+            BigDecimal fxRate,
+            String fxSource
+    ) {}
+
     public record CreateOrUpdateExpenseRequest(
             String title,
             BigDecimal amount,
@@ -31,7 +38,8 @@ public class ExpenseController {
 
             ExpenseService.SplitMethod splitMethod,
             List<UUID> participantMemberIds,
-            List<MemberAmount> customSplits
+            List<MemberAmount> customSplits,
+            OriginalMoney original
     ) {}
 
     public record ExpenseResponse(
@@ -43,12 +51,32 @@ public class ExpenseController {
             UUID paidByMemberId,
             LocalDate expenseDate,
             String note,
-            UUID createdByMemberId
+            UUID createdByMemberId,
+            BigDecimal originalAmount,
+            String originalCurrency,
+            BigDecimal fxRate,
+            String fxSource,
+            BigDecimal computedAmount,
+            Boolean amountOverridden
     ) {
         static ExpenseResponse from(ExpenseEntity e) {
+            BigDecimal computed = null;
+            if (e.getOriginalAmount() != null && e.getFxRate() != null) {
+                computed = e.getOriginalAmount()
+                        .multiply(e.getFxRate())
+                        .setScale(2, java.math.RoundingMode.HALF_UP);
+            }
+
             return new ExpenseResponse(
                     e.getId(), e.getTripId(), e.getTitle(), e.getAmount(), e.getCurrency(),
-                    e.getPaidByMemberId(), e.getExpenseDate(), e.getNote(), e.getCreatedByMemberId()
+                    e.getPaidByMemberId(), e.getExpenseDate(), e.getNote(), e.getCreatedByMemberId(),
+
+                    e.getOriginalAmount(),
+                    e.getOriginalCurrency(),
+                    e.getFxRate(),
+                    e.getFxSource(),
+                    computed,
+                    e.getAmountOverridden()
             );
         }
     }
@@ -56,6 +84,12 @@ public class ExpenseController {
     public record SplitResponse(UUID memberId, BigDecimal shareAmount) {
         static SplitResponse from(ExpenseSplitEntity s) {
             return new SplitResponse(s.getMemberId(), s.getShareAmount());
+        }
+    }
+
+    public record ExpenseSplitResponse(UUID memberId, BigDecimal shareAmount) {
+        static ExpenseSplitResponse from(ExpenseSplitEntity s) {
+            return new ExpenseSplitResponse(s.getMemberId(), s.getShareAmount());
         }
     }
 
@@ -96,10 +130,22 @@ public class ExpenseController {
         return new ExpenseDetailResponse(ExpenseResponse.from(e), splits);
     }
 
+    @GetMapping("/{expenseId}/splits")
+    public List<ExpenseSplitResponse> listSplits(@PathVariable UUID tripId, @PathVariable UUID expenseId) {
+        return expenseService.getSplitsByExpense(tripId, expenseId).stream()
+                .map(ExpenseSplitResponse::from)
+                .toList();
+    }
+
     @PostMapping
     public ExpenseDetailResponse create(@PathVariable UUID tripId, @RequestBody CreateOrUpdateExpenseRequest req) {
         var custom = req.customSplits() == null ? null :
                 req.customSplits().stream().map(x -> new ExpenseService.MemberAmount(x.memberId(), x.amount())).toList();
+        var original = req.original();
+        BigDecimal originalAmount = original != null ? original.amount() : null;
+        String originalCurrency = original != null ? original.currency() : null;
+        BigDecimal fxRate = original != null ? original.fxRate() : null;
+        String fxSource = original != null ? original.fxSource() : null;
 
         var e = expenseService.create(
                 tripId,
@@ -112,7 +158,11 @@ public class ExpenseController {
                 req.createdByMemberId(),
                 req.splitMethod(),
                 req.participantMemberIds(),
-                custom
+                custom,
+                originalAmount,
+                originalCurrency,
+                fxRate,
+                fxSource
         );
 
         var splits = expenseService.getSplits(e.getId()).stream().map(SplitResponse::from).toList();
@@ -123,6 +173,11 @@ public class ExpenseController {
     public ExpenseDetailResponse update(@PathVariable UUID tripId, @PathVariable UUID expenseId, @RequestBody CreateOrUpdateExpenseRequest req) {
         var custom = req.customSplits() == null ? null :
                 req.customSplits().stream().map(x -> new ExpenseService.MemberAmount(x.memberId(), x.amount())).toList();
+        var original = req.original();
+        BigDecimal originalAmount = original != null ? original.amount() : null;
+        String originalCurrency = original != null ? original.currency() : null;
+        BigDecimal fxRate = original != null ? original.fxRate() : null;
+        String fxSource = original != null ? original.fxSource() : null;
 
         var e = expenseService.update(
                 tripId,
@@ -135,7 +190,11 @@ public class ExpenseController {
                 req.note(),
                 req.splitMethod(),
                 req.participantMemberIds(),
-                custom
+                custom,
+                originalAmount,
+                originalCurrency,
+                fxRate,
+                fxSource
         );
 
         var splits = expenseService.getSplits(e.getId()).stream().map(SplitResponse::from).toList();

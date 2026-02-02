@@ -63,4 +63,20 @@ public class ExpenseEntity {
     void preUpdate() {
         updatedAt = Instant.now();
     }
+
+    @Column(name = "original_amount", precision = 12, scale = 2)
+    private BigDecimal originalAmount;
+
+    @Column(name = "original_currency", length = 3)
+    private String originalCurrency;
+
+    @Column(name = "fx_rate", precision = 18, scale = 8)
+    private BigDecimal fxRate;
+
+    @Column(name = "fx_source", length = 20)
+    private String fxSource;
+
+    @Column(name = "amount_overridden", nullable = false)
+    private Boolean amountOverridden = false;
+
 }

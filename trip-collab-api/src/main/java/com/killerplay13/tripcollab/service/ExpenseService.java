@@ -6,6 +6,7 @@ import com.killerplay13.tripcollab.domain.TripMemberEntity;
 import com.killerplay13.tripcollab.repo.ExpenseRepository;
 import com.killerplay13.tripcollab.repo.ExpenseSplitRepository;
 import com.killerplay13.tripcollab.repo.TripMemberRepository;
+import com.killerplay13.tripcollab.repo.TripRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,7 @@ public class ExpenseService {
     private final ExpenseRepository expenseRepository;
     private final ExpenseSplitRepository splitRepository;
     private final TripMemberRepository tripMemberRepository;
+    private final TripRepository tripRepository;
 
     // ---------- Queries ----------
     public List<ExpenseEntity> listDay(UUID tripId, LocalDate day) {
@@ -50,6 +52,11 @@ public class ExpenseService {
         return splitRepository.findByExpenseId(expenseId);
     }
 
+    public List<ExpenseSplitEntity> getSplitsByExpense(UUID tripId, UUID expenseId) {
+        get(tripId, expenseId);
+        return splitRepository.findByExpenseId(expenseId);
+    }
+
     // ---------- Commands ----------
     @Transactional
     public ExpenseEntity create(
@@ -63,29 +70,37 @@ public class ExpenseService {
             UUID createdByMemberId,
             SplitMethod splitMethod,
             List<UUID> participantMemberIds,
-            List<MemberAmount> customSplits
+            List<MemberAmount> customSplits,
+            BigDecimal originalAmount,
+            String originalCurrency,
+            BigDecimal fxRate,
+            String fxSource
     ) {
         validateMembers(tripId, paidByMemberId, participantMemberIds, customSplits);
 
-        var normalizedAmount = normalizeMoney(amount);
-        if (normalizedAmount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount must be > 0");
-        }
+        String tripCurrency = getTripCurrency(tripId);
+
+        FxResolved fx = resolveAmountInTripCurrency(tripCurrency, amount, currency, originalAmount, originalCurrency, fxRate);
 
         var expense = ExpenseEntity.builder()
                 .tripId(tripId)
                 .title(requireNonBlank(title, "title"))
-                .amount(normalizedAmount)
-                .currency(normalizeCurrency(currency))
+                .amount(fx.finalAmount())
+                .currency(tripCurrency)
                 .paidByMemberId(paidByMemberId)
                 .expenseDate(expenseDate != null ? expenseDate : LocalDate.now())
                 .note(note)
                 .createdByMemberId(createdByMemberId)
+                .originalAmount(normalizeMoneyNullable(originalAmount))
+                .originalCurrency(normalizeCurrencyNullable(originalCurrency))
+                .fxRate(fxRate)
+                .fxSource(fxSource)
+                .amountOverridden(fx.overridden())
                 .build();
 
         expense = expenseRepository.save(expense);
 
-        var splits = buildSplits(expense.getId(), normalizedAmount, splitMethod, participantMemberIds, customSplits);
+        var splits = buildSplits(expense.getId(), fx.finalAmount(), splitMethod, participantMemberIds, customSplits);
         splitRepository.saveAll(splits);
 
         return expense;
@@ -103,29 +118,38 @@ public class ExpenseService {
             String note,
             SplitMethod splitMethod,
             List<UUID> participantMemberIds,
-            List<MemberAmount> customSplits
+            List<MemberAmount> customSplits,
+            BigDecimal originalAmount,
+            String originalCurrency,
+            BigDecimal fxRate,
+            String fxSource
     ) {
         var expense = get(tripId, expenseId);
 
         validateMembers(tripId, paidByMemberId, participantMemberIds, customSplits);
 
-        var normalizedAmount = normalizeMoney(amount);
-        if (normalizedAmount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount must be > 0");
-        }
+        String tripCurrency = getTripCurrency(tripId);
+
+        FxResolved fx = resolveAmountInTripCurrency(tripCurrency, amount, currency, originalAmount, originalCurrency, fxRate);
 
         expense.setTitle(requireNonBlank(title, "title"));
-        expense.setAmount(normalizedAmount);
-        expense.setCurrency(normalizeCurrency(currency));
+        expense.setAmount(fx.finalAmount());
+        expense.setCurrency(tripCurrency);
         expense.setPaidByMemberId(paidByMemberId);
         expense.setExpenseDate(expenseDate != null ? expenseDate : expense.getExpenseDate());
         expense.setNote(note);
+        expense.setOriginalAmount(normalizeMoneyNullable(originalAmount));
+        expense.setOriginalCurrency(normalizeCurrencyNullable(originalCurrency));
+        expense.setFxRate(fxRate);
+        expense.setFxSource(fxSource);
+        expense.setAmountOverridden(fx.overridden());
 
         expenseRepository.save(expense);
 
         // Replace splits
         splitRepository.deleteByExpenseId(expenseId);
-        var splits = buildSplits(expenseId, normalizedAmount, splitMethod, participantMemberIds, customSplits);
+        splitRepository.flush();
+        var splits = buildSplits(expenseId, fx.finalAmount(), splitMethod, participantMemberIds, customSplits);
         splitRepository.saveAll(splits);
 
         return expense;
@@ -153,6 +177,8 @@ public class ExpenseService {
     // ---------- Split building ----------
     public record MemberAmount(UUID memberId, BigDecimal amount) {}
 
+    private record FxResolved(BigDecimal finalAmount, BigDecimal computedAmount, boolean overridden) {}
+
     private List<ExpenseSplitEntity> buildSplits(
             UUID expenseId,
             BigDecimal total,
@@ -173,10 +199,12 @@ public class ExpenseService {
             String nickname,
             java.math.BigDecimal paidTotal,
             java.math.BigDecimal owedTotal,
-            java.math.BigDecimal net
+            java.math.BigDecimal net,
+            String currency
     ) {}
 
     public List<MemberSummary> summary(UUID tripId) {
+        String tripCurrency = getTripCurrency(tripId);
         // 1) members（用你已經有的 listActive）
         List<TripMemberEntity> members = tripMemberRepository.findByTripIdAndIsActiveTrueOrderByJoinedAtAsc(tripId);
 
@@ -199,7 +227,7 @@ public class ExpenseService {
             BigDecimal paid = paidMap.getOrDefault(m.getId(), BigDecimal.ZERO).setScale(2);
             BigDecimal owed = owedMap.getOrDefault(m.getId(), BigDecimal.ZERO).setScale(2);
             BigDecimal net = paid.subtract(owed).setScale(2);
-            return new MemberSummary(m.getId(), m.getNickname(), paid, owed, net);
+            return new MemberSummary(m.getId(), m.getNickname(), paid, owed, net, tripCurrency);
         }).toList();
     }
 
@@ -208,10 +236,13 @@ public class ExpenseService {
             String fromNickname,
             UUID toMemberId,
             String toNickname,
-            BigDecimal amount
+            BigDecimal amount,
+            String currency
     ) {}
 
     public List<SettlementTransfer> settlements(UUID tripId) {
+        String tripCurrency = getTripCurrency(tripId);
+
         var summaries = summary(tripId);
 
         // creditors: net > 0 (should receive)
@@ -247,7 +278,8 @@ public class ExpenseService {
                 transfers.add(new SettlementTransfer(
                         d.id(), d.name(),
                         c.id(), c.name(),
-                        pay
+                        pay,
+                        tripCurrency
                 ));
             }
 
@@ -268,6 +300,14 @@ public class ExpenseService {
     private List<ExpenseSplitEntity> buildEqualSplits(UUID expenseId, BigDecimal total, List<UUID> participants) {
         if (participants == null || participants.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "participantMemberIds is required for EQUAL split");
+        }
+
+        var seen = new HashSet<UUID>();
+        for (var mid : participants) {
+            if (mid == null) continue;
+            if (!seen.add(mid)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "duplicate memberId in participantMemberIds");
+            }
         }
 
         // stable order for deterministic remainder allocation
@@ -326,6 +366,57 @@ public class ExpenseService {
         return result;
     }
 
+    private String getTripCurrency(UUID tripId) {
+        var trip = tripRepository.findById(tripId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trip not found"));
+        String currency = trip.getCurrency();
+        if (currency == null || currency.isBlank()) {
+            return "TWD";
+        }
+        return currency.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private FxResolved resolveAmountInTripCurrency(
+            String tripCurrency,
+            BigDecimal reqAmount,
+            String reqCurrency,
+            BigDecimal originalAmount,
+            String originalCurrency,
+            BigDecimal fxRate
+    ) {
+        String normalizedReqCurrency = normalizeCurrencyNullable(reqCurrency);
+        if (normalizedReqCurrency == null || !normalizedReqCurrency.equals(tripCurrency)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "expense currency must match trip currency: " + tripCurrency
+            );
+        }
+
+        String normalizedOriginalCurrency = normalizeCurrencyNullable(originalCurrency);
+        if (normalizedOriginalCurrency == null) {
+            BigDecimal finalAmount = normalizeMoneyRequired(reqAmount, "amount");
+            if (finalAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount must be > 0");
+            }
+            return new FxResolved(finalAmount, null, false);
+        }
+
+        BigDecimal checkedOriginalAmount = normalizeMoneyRequired(originalAmount, "original.amount");
+        if (checkedOriginalAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "original.amount must be > 0");
+        }
+        BigDecimal checkedFxRate = requirePositiveNumber(fxRate, "original.fxRate");
+        BigDecimal computed = checkedOriginalAmount.multiply(checkedFxRate).setScale(2, RoundingMode.HALF_UP);
+
+        if (reqAmount == null) {
+            return new FxResolved(computed, computed, false);
+        }
+
+        BigDecimal finalAmount = reqAmount.setScale(2, RoundingMode.HALF_UP);
+        boolean overridden = finalAmount.compareTo(computed) != 0;
+        return new FxResolved(finalAmount, computed, overridden);
+    }
+
     // ---------- Validation helpers ----------
     private void validateMembers(UUID tripId, UUID paidBy, List<UUID> participants, List<MemberAmount> customSplits) {
         if (paidBy == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "paidByMemberId is required");
@@ -364,10 +455,33 @@ public class ExpenseService {
         return v.setScale(2, RoundingMode.HALF_UP);
     }
 
+    private static BigDecimal normalizeMoneyRequired(BigDecimal v, String field) {
+        if (v == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " is required");
+        return v.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal normalizeMoneyNullable(BigDecimal v) {
+        if (v == null) return null;
+        return v.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal requirePositiveNumber(BigDecimal v, String field) {
+        if (v == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " is required");
+        if (v.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be > 0");
+        }
+        return v;
+    }
+
     private static String normalizeCurrency(String ccy) {
         if (ccy == null || ccy.isBlank()) return "TWD";
         var v = ccy.trim().toUpperCase(Locale.ROOT);
         if (v.length() != 3) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "currency must be 3 letters");
         return v;
+    }
+
+    private static String normalizeCurrencyNullable(String ccy) {
+        if (ccy == null || ccy.isBlank()) return null;
+        return ccy.trim().toUpperCase(Locale.ROOT);
     }
 }
