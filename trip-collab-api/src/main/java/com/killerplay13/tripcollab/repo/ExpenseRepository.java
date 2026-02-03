@@ -36,6 +36,7 @@ public interface ExpenseRepository extends JpaRepository<ExpenseEntity, UUID> {
     select e.paidByMemberId, coalesce(sum(e.amount), 0)
     from ExpenseEntity e
     where e.tripId = :tripId
+      and e.paymentSource = 'PERSONAL'
     group by e.paidByMemberId
     """)
     List<Object[]> sumPaidByMember(@Param("tripId") UUID tripId);

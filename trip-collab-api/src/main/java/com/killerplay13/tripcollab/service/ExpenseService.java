@@ -25,10 +25,14 @@ public class ExpenseService {
 
     public enum SplitMethod { EQUAL, CUSTOM_AMOUNT }
 
+    private static final String PAYMENT_SOURCE_PERSONAL = "PERSONAL";
+    private static final String PAYMENT_SOURCE_SHARED_WALLET = "SHARED_WALLET";
+
     private final ExpenseRepository expenseRepository;
     private final ExpenseSplitRepository splitRepository;
     private final TripMemberRepository tripMemberRepository;
     private final TripRepository tripRepository;
+    private final WalletCommandService walletCommandService;
 
     // ---------- Queries ----------
     public List<ExpenseEntity> listDay(UUID tripId, LocalDate day) {
@@ -64,6 +68,7 @@ public class ExpenseService {
             String title,
             BigDecimal amount,
             String currency,
+            String paymentSource,
             UUID paidByMemberId,
             LocalDate expenseDate,
             String note,
@@ -76,32 +81,67 @@ public class ExpenseService {
             BigDecimal fxRate,
             String fxSource
     ) {
-        validateMembers(tripId, paidByMemberId, participantMemberIds, customSplits);
+        String normalizedPaymentSource = normalizePaymentSource(paymentSource);
+        boolean isSharedWallet = PAYMENT_SOURCE_SHARED_WALLET.equals(normalizedPaymentSource);
+
+        if (isSharedWallet) {
+            if (originalCurrency == null || originalCurrency.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "originalCurrency is required for shared wallet payments");
+            }
+            if (originalAmount == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "originalAmount is required for shared wallet payments");
+            }
+            if (fxRate == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "fxRate is required for shared wallet payments");
+            }
+        }
+
+        validateMembers(tripId, paidByMemberId, participantMemberIds, customSplits, !isSharedWallet);
 
         String tripCurrency = getTripCurrency(tripId);
 
         FxResolved fx = resolveAmountInTripCurrency(tripCurrency, amount, currency, originalAmount, originalCurrency, fxRate);
+        String normalizedOriginalCurrency = normalizeCurrencyNullable(originalCurrency);
+        UUID paidByForStorage = isSharedWallet ? null : paidByMemberId;
 
         var expense = ExpenseEntity.builder()
                 .tripId(tripId)
                 .title(requireNonBlank(title, "title"))
                 .amount(fx.finalAmount())
                 .currency(tripCurrency)
-                .paidByMemberId(paidByMemberId)
+                .paidByMemberId(paidByForStorage)
                 .expenseDate(expenseDate != null ? expenseDate : LocalDate.now())
                 .note(note)
                 .createdByMemberId(createdByMemberId)
                 .originalAmount(normalizeMoneyNullable(originalAmount))
-                .originalCurrency(normalizeCurrencyNullable(originalCurrency))
+                .originalCurrency(normalizedOriginalCurrency)
                 .fxRate(fxRate)
                 .fxSource(fxSource)
                 .amountOverridden(fx.overridden())
+                .paymentSource(normalizedPaymentSource)
                 .build();
 
         expense = expenseRepository.save(expense);
 
         var splits = buildSplits(expense.getId(), fx.finalAmount(), splitMethod, participantMemberIds, customSplits);
         splitRepository.saveAll(splits);
+
+        if (isSharedWallet) {
+            var walletCurrency = normalizedOriginalCurrency != null ? normalizedOriginalCurrency : tripCurrency;
+            var walletAmount = normalizedOriginalCurrency != null ? normalizeMoneyRequired(originalAmount, "original.amount") : fx.finalAmount();
+            var walletFxRate = normalizedOriginalCurrency != null ? requirePositiveNumber(fxRate, "original.fxRate") : BigDecimal.ONE;
+
+            walletCommandService.recordExpense(
+                    tripId,
+                    expense.getId(),
+                    null,
+                    walletAmount,
+                    walletCurrency,
+                    walletFxRate,
+                    fxSource,
+                    note
+            );
+        }
 
         return expense;
     }
@@ -125,8 +165,14 @@ public class ExpenseService {
             String fxSource
     ) {
         var expense = get(tripId, expenseId);
+        if (PAYMENT_SOURCE_SHARED_WALLET.equals(expense.getPaymentSource())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Editing shared-wallet-paid expenses is not supported in v0.1"
+            );
+        }
 
-        validateMembers(tripId, paidByMemberId, participantMemberIds, customSplits);
+        validateMembers(tripId, paidByMemberId, participantMemberIds, customSplits, true);
 
         String tripCurrency = getTripCurrency(tripId);
 
@@ -158,7 +204,13 @@ public class ExpenseService {
     @Transactional
     public void delete(UUID tripId, UUID expenseId) {
         // ensure exists and belongs to trip
-        get(tripId, expenseId);
+        var expense = get(tripId, expenseId);
+        if (PAYMENT_SOURCE_SHARED_WALLET.equals(expense.getPaymentSource())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Deleting shared-wallet-paid expenses is not supported in v0.1"
+            );
+        }
         // splits cascade by FK, but we delete explicitly to be safe/clear
         splitRepository.deleteByExpenseId(expenseId);
         expenseRepository.deleteByIdAndTripId(expenseId, tripId);
@@ -388,7 +440,7 @@ public class ExpenseService {
         if (normalizedReqCurrency == null || !normalizedReqCurrency.equals(tripCurrency)) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "expense currency must match trip currency: " + tripCurrency
+                    "currency must equal trip base currency (" + tripCurrency + "). Use originalAmount/originalCurrency + fxRate for foreign expenses."
             );
         }
 
@@ -418,10 +470,18 @@ public class ExpenseService {
     }
 
     // ---------- Validation helpers ----------
-    private void validateMembers(UUID tripId, UUID paidBy, List<UUID> participants, List<MemberAmount> customSplits) {
-        if (paidBy == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "paidByMemberId is required");
-        if (!tripMemberRepository.existsByIdAndTripIdAndIsActiveTrue(paidBy, tripId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "paidByMemberId is not an active member of this trip");
+    private void validateMembers(
+            UUID tripId,
+            UUID paidBy,
+            List<UUID> participants,
+            List<MemberAmount> customSplits,
+            boolean requirePaidBy
+    ) {
+        if (requirePaidBy) {
+            if (paidBy == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "paidByMemberId is required");
+            if (!tripMemberRepository.existsByIdAndTripIdAndIsActiveTrue(paidBy, tripId)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "paidByMemberId is not an active member of this trip");
+            }
         }
 
         // for EQUAL participants
@@ -482,6 +542,20 @@ public class ExpenseService {
 
     private static String normalizeCurrencyNullable(String ccy) {
         if (ccy == null || ccy.isBlank()) return null;
-        return ccy.trim().toUpperCase(Locale.ROOT);
+        var v = ccy.trim().toUpperCase(Locale.ROOT);
+        if (v.length() != 3) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "currency must be 3 letters");
+        return v;
     }
+
+    private static String normalizePaymentSource(String paymentSource) {
+        if (paymentSource == null || paymentSource.isBlank()) {
+            return PAYMENT_SOURCE_PERSONAL;
+        }
+        String v = paymentSource.trim().toUpperCase(Locale.ROOT);
+        if (!PAYMENT_SOURCE_PERSONAL.equals(v) && !PAYMENT_SOURCE_SHARED_WALLET.equals(v)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "paymentSource is invalid");
+        }
+        return v;
+    }
+
 }

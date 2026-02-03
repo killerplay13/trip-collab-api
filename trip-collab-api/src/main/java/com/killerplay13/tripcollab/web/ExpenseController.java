@@ -27,10 +27,16 @@ public class ExpenseController {
             String fxSource
     ) {}
 
+    /**
+     * amount/currency: always in trip base currency (used for settlements).
+     * original.amount/original.currency/fxRate: for foreign currency expenses; system converts to base.
+     * If paymentSource = SHARED_WALLET, original fields are required.
+     */
     public record CreateOrUpdateExpenseRequest(
             String title,
             BigDecimal amount,
             String currency,
+            String paymentSource,
             UUID paidByMemberId,
             LocalDate expenseDate,
             String note,
@@ -138,6 +144,10 @@ public class ExpenseController {
     }
 
     @PostMapping
+    /**
+     * amount/currency must be in trip base currency.
+     * For foreign expenses, provide original fields with fxRate.
+     */
     public ExpenseDetailResponse create(@PathVariable UUID tripId, @RequestBody CreateOrUpdateExpenseRequest req) {
         var custom = req.customSplits() == null ? null :
                 req.customSplits().stream().map(x -> new ExpenseService.MemberAmount(x.memberId(), x.amount())).toList();
@@ -152,6 +162,7 @@ public class ExpenseController {
                 req.title(),
                 req.amount(),
                 req.currency(),
+                req.paymentSource(),
                 req.paidByMemberId(),
                 req.expenseDate(),
                 req.note(),

@@ -32,7 +32,7 @@ public class ExpenseEntity {
     @Column(name = "currency", nullable = false, length = 3)
     private String currency = "TWD";
 
-    @Column(name = "paid_by_member_id", nullable = false)
+    @Column(name = "paid_by_member_id")
     private UUID paidByMemberId;
 
     @Column(name = "expense_date", nullable = false)
@@ -57,6 +57,7 @@ public class ExpenseEntity {
         if (updatedAt == null) updatedAt = now;
         if (expenseDate == null) expenseDate = LocalDate.now();
         if (currency == null || currency.isBlank()) currency = "TWD";
+        if (paymentSource == null || paymentSource.isBlank()) paymentSource = "PERSONAL";
     }
 
     @PreUpdate
@@ -78,5 +79,8 @@ public class ExpenseEntity {
 
     @Column(name = "amount_overridden", nullable = false)
     private Boolean amountOverridden = false;
+
+    @Column(name = "payment_source", nullable = false, length = 20)
+    private String paymentSource = "PERSONAL";
 
 }
