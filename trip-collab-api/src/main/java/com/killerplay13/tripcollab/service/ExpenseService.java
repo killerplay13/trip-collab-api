@@ -101,6 +101,12 @@ public class ExpenseService {
         String tripCurrency = getTripCurrency(tripId);
 
         FxResolved fx = resolveAmountInTripCurrency(tripCurrency, amount, currency, originalAmount, originalCurrency, fxRate);
+        if (isSharedWallet && fx.overridden()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Amount override is not allowed for SHARED_WALLET. Top-level amount must equal original.amount * original.fxRate in trip base currency."
+            );
+        }
         String normalizedOriginalCurrency = normalizeCurrencyNullable(originalCurrency);
         UUID paidByForStorage = isSharedWallet ? null : paidByMemberId;
 

@@ -31,6 +31,7 @@ public class ExpenseController {
      * amount/currency: always in trip base currency (used for settlements).
      * original.amount/original.currency/fxRate: for foreign currency expenses; system converts to base.
      * If paymentSource = SHARED_WALLET, original fields are required.
+     * For SHARED_WALLET, amount override is not allowed; amount must equal original converted amount.
      */
     public record CreateOrUpdateExpenseRequest(
             String title,
