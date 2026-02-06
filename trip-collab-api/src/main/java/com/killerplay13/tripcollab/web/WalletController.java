@@ -2,6 +2,8 @@ package com.killerplay13.tripcollab.web;
 
 import com.killerplay13.tripcollab.service.WalletCommandService;
 import com.killerplay13.tripcollab.service.WalletQueryService;
+import com.killerplay13.tripcollab.security.AuthGuard;
+import com.killerplay13.tripcollab.security.MemberTokenFilter;
 import com.killerplay13.tripcollab.wallet.dto.WalletDepositRequest;
 import com.killerplay13.tripcollab.wallet.dto.WalletExchangeRequest;
 import com.killerplay13.tripcollab.wallet.dto.WalletExchangeResponse;
@@ -9,6 +11,7 @@ import com.killerplay13.tripcollab.wallet.dto.WalletSummaryResponse;
 import com.killerplay13.tripcollab.wallet.dto.WalletTransactionListResponse;
 import com.killerplay13.tripcollab.wallet.dto.WalletTransactionResponse;
 import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -62,20 +65,28 @@ public class WalletController {
     }
 
     @PostMapping("/deposits")
-    public ResponseEntity<WalletTransactionResponse> deposit(
+    public ResponseEntity<?> deposit(
             @PathVariable UUID tripId,
-            @RequestBody WalletDepositRequest req
+            @RequestBody WalletDepositRequest req,
+            HttpServletRequest request
     ) {
-        var result = walletCommandService.deposit(tripId, req);
+        ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+        if (guard != null) return guard;
+        UUID actorMemberId = (UUID) request.getAttribute(MemberTokenFilter.ATTR_MEMBER_ID);
+        var result = walletCommandService.deposit(tripId, actorMemberId, req);
         return ResponseEntity.status(201).body(result);
     }
 
     @PostMapping("/exchanges")
-    public ResponseEntity<WalletExchangeResponse> exchange(
+    public ResponseEntity<?> exchange(
             @PathVariable UUID tripId,
-            @RequestBody WalletExchangeRequest req
+            @RequestBody WalletExchangeRequest req,
+            HttpServletRequest request
     ) {
-        var result = walletCommandService.exchange(tripId, req);
+        ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+        if (guard != null) return guard;
+        UUID actorMemberId = (UUID) request.getAttribute(MemberTokenFilter.ATTR_MEMBER_ID);
+        var result = walletCommandService.exchange(tripId, actorMemberId, req);
         return ResponseEntity.status(201).body(result);
     }
 }

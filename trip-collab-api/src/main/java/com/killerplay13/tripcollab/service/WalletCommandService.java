@@ -30,7 +30,7 @@ public class WalletCommandService {
     private final WalletTransactionRepository walletTransactionRepository;
 
     @Transactional
-    public WalletTransactionResponse deposit(UUID tripId, WalletDepositRequest req) {
+    public WalletTransactionResponse deposit(UUID tripId, UUID actorMemberId, WalletDepositRequest req) {
         var wallet = sharedWalletRepository.findByTripId(tripId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
@@ -52,7 +52,7 @@ public class WalletCommandService {
                 .originalCurrency(currency)
                 .fxRate(fxRate)
                 .computedBaseAmount(computedBaseAmount)
-                .memberId(req.memberId())
+                .memberId(actorMemberId)
                 .fxSource(req.fxSource())
                 .note(req.note())
                 .build();
@@ -132,7 +132,7 @@ public class WalletCommandService {
     }
 
     @Transactional
-    public WalletExchangeResponse exchange(UUID tripId, WalletExchangeRequest req) {
+    public WalletExchangeResponse exchange(UUID tripId, UUID actorMemberId, WalletExchangeRequest req) {
         var wallet = sharedWalletRepository.findByTripId(tripId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
@@ -180,7 +180,7 @@ public class WalletCommandService {
                 .originalCurrency(fromCurrency)
                 .fxRate(fromFxRate)
                 .computedBaseAmount(outBase)
-                .memberId(req.memberId())
+                .memberId(actorMemberId)
                 .fxSource(req.fxSource())
                 .note(req.note())
                 .exchangeGroupId(exchangeGroupId)
@@ -194,7 +194,7 @@ public class WalletCommandService {
                 .originalCurrency(toCurrency)
                 .fxRate(toFxRate)
                 .computedBaseAmount(inBase)
-                .memberId(req.memberId())
+                .memberId(actorMemberId)
                 .fxSource(req.fxSource())
                 .note(req.note())
                 .exchangeGroupId(exchangeGroupId)

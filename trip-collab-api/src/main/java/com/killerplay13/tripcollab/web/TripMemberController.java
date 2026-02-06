@@ -2,8 +2,11 @@ package com.killerplay13.tripcollab.web;
 
 import com.killerplay13.tripcollab.domain.TripMemberEntity;
 import com.killerplay13.tripcollab.repo.TripMemberRepository;
+import com.killerplay13.tripcollab.security.AuthGuard;
 import com.killerplay13.tripcollab.service.TripMemberService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -58,8 +61,15 @@ public class TripMemberController {
     }
 
     @PatchMapping("/{memberId}")
-    public MemberResponse patch(@PathVariable UUID tripId, @PathVariable UUID memberId, @RequestBody PatchMemberRequest req) {
+    public ResponseEntity<?> patch(
+            @PathVariable UUID tripId,
+            @PathVariable UUID memberId,
+            @RequestBody PatchMemberRequest req,
+            HttpServletRequest request
+    ) {
+        ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+        if (guard != null) return guard;
         var updated = tripMemberService.update(tripId, memberId, req.nickname(), req.isActive());
-        return MemberResponse.from(updated);
+        return ResponseEntity.ok(MemberResponse.from(updated));
     }
 }

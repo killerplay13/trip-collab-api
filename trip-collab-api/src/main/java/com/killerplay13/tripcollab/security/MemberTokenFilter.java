@@ -1,6 +1,7 @@
 package com.killerplay13.tripcollab.security;
 
-import com.killerplay13.tripcollab.repo.TripRepository;
+import com.killerplay13.tripcollab.domain.TripMemberEntity;
+import com.killerplay13.tripcollab.repo.TripMemberRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -9,12 +10,16 @@ import java.io.IOException;
 import java.util.UUID;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-public class TripTokenFilter extends OncePerRequestFilter {
+public class MemberTokenFilter extends OncePerRequestFilter {
 
-  private final TripRepository tripRepository;
+  public static final String ATTR_MEMBER_ID = "memberId";
+  public static final String ATTR_TRIP_ID = "tripId";
+  public static final String ATTR_ROLE = "role";
 
-  public TripTokenFilter(TripRepository tripRepository) {
-    this.tripRepository = tripRepository;
+  private final TripMemberRepository tripMemberRepository;
+
+  public MemberTokenFilter(TripMemberRepository tripMemberRepository) {
+    this.tripMemberRepository = tripMemberRepository;
   }
 
   @Override
@@ -24,13 +29,11 @@ public class TripTokenFilter extends OncePerRequestFilter {
 
     if (method.equalsIgnoreCase("OPTIONS")) return true;
 
-    // allow creating trip without token
     if (path.equals("/api/trips") && method.equalsIgnoreCase("POST")) return true;
 
-    // only enforce invite token on join
-    if (path.matches("^/api/trips/[^/]+/members$") && method.equalsIgnoreCase("POST")) return false;
+    if (path.matches("^/api/trips/[^/]+/members$") && method.equalsIgnoreCase("POST")) return true;
 
-    return true;
+    return !path.startsWith("/api/trips/");
   }
 
   @Override
@@ -40,9 +43,9 @@ public class TripTokenFilter extends OncePerRequestFilter {
       FilterChain filterChain
   ) throws ServletException, IOException {
 
-    String token = request.getHeader("X-Trip-Token");
+    String token = request.getHeader("X-Member-Token");
     if (token == null || token.isBlank()) {
-      FilterErrorUtil.writeJsonError(request, response, 401, "Missing X-Trip-Token");
+      FilterErrorUtil.writeJsonError(request, response, 401, "Missing X-Member-Token");
       return;
     }
 
@@ -53,11 +56,22 @@ public class TripTokenFilter extends OncePerRequestFilter {
     }
 
     String tokenHash = TripTokenUtil.sha256Hex(token.trim());
-    boolean ok = tripRepository.existsByIdAndInviteTokenHashAndInviteEnabledTrue(tripId, tokenHash);
-    if (!ok) {
-      FilterErrorUtil.writeJsonError(request, response, 401, "Invalid trip token");
+    TripMemberEntity member = tripMemberRepository
+        .findByMemberTokenHashAndIsActiveTrue(tokenHash)
+        .orElse(null);
+    if (member == null) {
+      FilterErrorUtil.writeJsonError(request, response, 401, "Invalid member token");
       return;
     }
+
+    if (!tripId.equals(member.getTripId())) {
+      FilterErrorUtil.writeJsonError(request, response, 403, "Member token does not belong to this trip");
+      return;
+    }
+
+    request.setAttribute(ATTR_MEMBER_ID, member.getId());
+    request.setAttribute(ATTR_TRIP_ID, member.getTripId());
+    request.setAttribute(ATTR_ROLE, member.getRole());
 
     filterChain.doFilter(request, response);
   }
@@ -72,5 +86,4 @@ public class TripTokenFilter extends OncePerRequestFilter {
       return null;
     }
   }
-
 }

@@ -2,8 +2,11 @@ package com.killerplay13.tripcollab.web;
 
 import com.killerplay13.tripcollab.domain.ExpenseEntity;
 import com.killerplay13.tripcollab.domain.ExpenseSplitEntity;
+import com.killerplay13.tripcollab.security.AuthGuard;
 import com.killerplay13.tripcollab.service.ExpenseService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -182,7 +185,15 @@ public class ExpenseController {
     }
 
     @PutMapping("/{expenseId}")
-    public ExpenseDetailResponse update(@PathVariable UUID tripId, @PathVariable UUID expenseId, @RequestBody CreateOrUpdateExpenseRequest req) {
+    public ResponseEntity<?> update(
+            @PathVariable UUID tripId,
+            @PathVariable UUID expenseId,
+            @RequestBody CreateOrUpdateExpenseRequest req,
+            HttpServletRequest request
+    ) {
+        ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+        if (guard != null) return guard;
+
         var custom = req.customSplits() == null ? null :
                 req.customSplits().stream().map(x -> new ExpenseService.MemberAmount(x.memberId(), x.amount())).toList();
         var original = req.original();
@@ -210,18 +221,33 @@ public class ExpenseController {
         );
 
         var splits = expenseService.getSplits(e.getId()).stream().map(SplitResponse::from).toList();
-        return new ExpenseDetailResponse(ExpenseResponse.from(e), splits);
+        return ResponseEntity.ok(new ExpenseDetailResponse(ExpenseResponse.from(e), splits));
     }
 
     @DeleteMapping("/{expenseId}")
-    public void delete(@PathVariable UUID tripId, @PathVariable UUID expenseId) {
+    public ResponseEntity<?> delete(
+            @PathVariable UUID tripId,
+            @PathVariable UUID expenseId,
+            HttpServletRequest request
+    ) {
+        ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+        if (guard != null) return guard;
+
         expenseService.delete(tripId, expenseId);
+        return ResponseEntity.ok().build();
     }
 
     @PostMapping("/{expenseId}/move")
-    public ExpenseResponse move(@PathVariable UUID tripId, @PathVariable UUID expenseId, @RequestBody MoveExpenseRequest req) {
+    public ResponseEntity<?> move(
+            @PathVariable UUID tripId,
+            @PathVariable UUID expenseId,
+            @RequestBody MoveExpenseRequest req,
+            HttpServletRequest request
+    ) {
+        ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+        if (guard != null) return guard;
         var e = expenseService.move(tripId, expenseId, req.newDate());
-        return ExpenseResponse.from(e);
+        return ResponseEntity.ok(ExpenseResponse.from(e));
     }
 
     @GetMapping("/summary")

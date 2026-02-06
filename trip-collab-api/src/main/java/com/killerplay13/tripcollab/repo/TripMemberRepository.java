@@ -13,5 +13,7 @@ public interface TripMemberRepository extends JpaRepository<TripMemberEntity, UU
 
     Optional<TripMemberEntity> findByIdAndTripId(UUID id, UUID tripId);
 
+    Optional<TripMemberEntity> findByMemberTokenHashAndIsActiveTrue(String memberTokenHash);
+
     boolean existsByTripIdAndNickname(UUID tripId, String nickname);
 }

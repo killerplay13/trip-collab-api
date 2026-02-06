@@ -1,13 +1,16 @@
 package com.killerplay13.tripcollab.web;
 
 import com.killerplay13.tripcollab.domain.ItineraryItem;
+import com.killerplay13.tripcollab.security.AuthGuard;
 import com.killerplay13.tripcollab.service.ItineraryService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.ResponseEntity;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
@@ -34,9 +37,24 @@ public class ItineraryController {
       @PathVariable UUID tripId,
       @RequestBody CreateItineraryItemRequest req
   ) {
+    LocalDate dayDate = req.dayDate();
+    String title = req.title();
+    LocalTime startTime = req.startTime();
+    LocalTime endTime = req.endTime();
+    String locationName = req.locationName();
+    String mapUrl = req.mapUrl();
+    String note = req.note();
+    Integer sortOrder = req.sortOrder();
+
     ItineraryItem item = service.create(tripId, new ItineraryService.CreateItineraryItemCommand(
-        req.dayDate(), req.title(), req.startTime(), req.endTime(),
-        req.locationName(), req.mapUrl(), req.note(), req.sortOrder()
+        dayDate,
+        title,
+        startTime,
+        endTime,
+        locationName,
+        mapUrl,
+        note,
+        sortOrder
     ));
     return toResponse(item);
   }
@@ -55,19 +73,32 @@ public class ItineraryController {
   }
 
   @DeleteMapping("/{itemId}")
-  public void delete(@PathVariable UUID tripId, @PathVariable UUID itemId) {
+  public ResponseEntity<?> delete(
+      @PathVariable UUID tripId,
+      @PathVariable UUID itemId,
+      HttpServletRequest request
+  ) {
+    ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+    if (guard != null) return guard;
     service.delete(tripId, itemId);
+    return ResponseEntity.ok().build();
   }
 
   @PutMapping("/reorder")
-  public void reorder(
+  public ResponseEntity<?> reorder(
     @PathVariable UUID tripId,
     @RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-    @RequestBody List<ReorderIdOnly> items
+    @RequestBody List<ReorderIdOnly> items,
+    HttpServletRequest request
 ) {
-  service.reorder(tripId, date, items.stream()
-      .map(i -> new ItineraryService.ReorderItem(i.id(), 0)) // sortOrder 不用，service 會壓縮
-      .toList());
+  ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+  if (guard != null) return guard;
+  // sortOrder is ignored; service will normalize
+  List<ItineraryService.ReorderItem> reorderItems = items.stream()
+      .map((ReorderIdOnly i) -> new ItineraryService.ReorderItem(i.id(), 0))
+      .toList();
+  service.reorder(tripId, date, reorderItems);
+  return ResponseEntity.ok().build();
 }
 
 @GetMapping("/all")
@@ -98,13 +129,16 @@ public record ReorderIdOnly(@NotNull UUID id) {}
 
 
   @PostMapping("/{itemId}/move")
-    public ItineraryItemResponse move(
+    public ResponseEntity<?> move(
         @PathVariable UUID tripId,
         @PathVariable UUID itemId,
-        @RequestBody MoveRequest req
+        @RequestBody MoveRequest req,
+        HttpServletRequest request
     ) {
+    ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+    if (guard != null) return guard;
     ItineraryItem item = service.moveToDate(tripId, itemId, req.toDate());
-    return toResponse(item);
+    return ResponseEntity.ok(toResponse(item));
     }
 
     @GetMapping("/search")
