@@ -29,9 +29,11 @@ public class ItineraryService {
   }
 
   @Transactional
-  public ItineraryItem create(UUID tripId, CreateItineraryItemCommand cmd) {
+  public ItineraryItem create(UUID tripId, UUID actorMemberId, CreateItineraryItemCommand cmd) {
     ItineraryItem item = new ItineraryItem();
     item.setTripId(tripId);
+    item.setCreatedByMemberId(actorMemberId);
+    item.setUpdatedByMemberId(actorMemberId);
     item.setDayDate(cmd.dayDate());
     item.setTitle(cmd.title());
     item.setStartTime(cmd.startTime());
@@ -49,10 +51,11 @@ public class ItineraryService {
   }
 
   @Transactional
-  public ItineraryItem patch(UUID tripId, UUID itemId, PatchItineraryItemCommand cmd) {
+  public ItineraryItem patch(UUID tripId, UUID itemId, UUID actorMemberId, PatchItineraryItemCommand cmd) {
     ItineraryItem item = repo.findByIdAndTripId(itemId, tripId)
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
 
+    item.setUpdatedByMemberId(actorMemberId);
     if (cmd.dayDate() != null) item.setDayDate(cmd.dayDate());
     if (cmd.title() != null) item.setTitle(cmd.title());
     if (cmd.startTime() != null) item.setStartTime(cmd.startTime());
@@ -66,14 +69,14 @@ public class ItineraryService {
   }
 
   @Transactional
-  public void delete(UUID tripId, UUID itemId) {
+  public void delete(UUID tripId, UUID itemId, UUID actorMemberId) {
     ItineraryItem item = repo.findByIdAndTripId(itemId, tripId)
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
     repo.delete(item);
   }
 
   @Transactional
-  public void reorder(UUID tripId, LocalDate dayDate, List<ReorderItem> items) {
+  public void reorder(UUID tripId, LocalDate dayDate, UUID actorMemberId, List<ReorderItem> items) {
   if (dayDate == null) {
     throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "date is required");
   }
@@ -98,13 +101,13 @@ public class ItineraryService {
   // （前端只要給 list 順序即可，不用自己算 sortOrder）
   for (int idx = 0; idx < items.size(); idx++) {
     UUID id = items.get(idx).id();
-    repo.updateSortOrder(tripId, id, idx);
+    repo.updateSortOrder(tripId, id, idx, actorMemberId);
   }
 }
 
 
   @Transactional
-  public ItineraryItem moveToDate(UUID tripId, UUID itemId, LocalDate toDate) {
+  public ItineraryItem moveToDate(UUID tripId, UUID itemId, UUID actorMemberId, LocalDate toDate) {
     ItineraryItem item = repo.findByIdAndTripId(itemId, tripId)
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
 
@@ -122,6 +125,7 @@ public class ItineraryService {
 
     item.setDayDate(toDate);
     item.setSortOrder(next);
+    item.setUpdatedByMemberId(actorMemberId);
 
     return repo.save(item);
   }
@@ -157,7 +161,7 @@ public class ItineraryService {
  }
 
   @Transactional
-  public List<ItineraryItem> bulkCreate(UUID tripId, LocalDate dayDate, List<ItineraryController.BulkItem> items) {
+  public List<ItineraryItem> bulkCreate(UUID tripId, UUID actorMemberId, LocalDate dayDate, List<ItineraryController.BulkItem> items) {
     if (dayDate == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "dayDate is required");
     }
@@ -187,6 +191,8 @@ public class ItineraryService {
       e.setStartTime(parseTimeOrNull(it.startTime(), "startTime", i));
       e.setEndTime(parseTimeOrNull(it.endTime(), "endTime", i));
       e.setSortOrder(base + i);
+      e.setCreatedByMemberId(actorMemberId);
+      e.setUpdatedByMemberId(actorMemberId);
 
       toSave.add(e);
     }
@@ -216,7 +222,7 @@ public class ItineraryService {
   }
 
   @Transactional
-  public List<ItineraryItem> pasteToBulk(UUID tripId, LocalDate dayDate, String text) {
+  public List<ItineraryItem> pasteToBulk(UUID tripId, UUID actorMemberId, LocalDate dayDate, String text) {
     if (dayDate == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "dayDate is required");
     }
@@ -239,12 +245,12 @@ public class ItineraryService {
             ))
             .toList();
 
-    return bulkCreate(tripId, dayDate, bulkItems);
+    return bulkCreate(tripId, actorMemberId, dayDate, bulkItems);
   }
 
 
   @Transactional
-  public ItineraryItem updateItem(UUID tripId, UUID itemId, UpdateCmd cmd) {
+  public ItineraryItem updateItem(UUID tripId, UUID itemId, UUID actorMemberId, UpdateCmd cmd) {
     var item = repo.findByIdAndTripId(itemId, tripId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "itinerary item not found"));
 
@@ -266,6 +272,8 @@ public class ItineraryService {
     if (cmd.locationName != null) item.setLocationName(blankToNull(cmd.locationName));
     if (cmd.mapUrl != null) item.setMapUrl(blankToNull(cmd.mapUrl));
     if (cmd.note != null) item.setNote(blankToNull(cmd.note));
+    
+    item.setUpdatedByMemberId(actorMemberId);
 
     return repo.save(item);
   }

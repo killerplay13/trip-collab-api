@@ -28,8 +28,19 @@ List<UUID> findIdsByTripIdAndDayDate(@Param("tripId") UUID tripId, @Param("dayDa
 
 
 @Modifying
-@Query("update ItineraryItem i set i.sortOrder = :sortOrder, i.updatedAt = CURRENT_TIMESTAMP where i.id = :id and i.tripId = :tripId")
-int updateSortOrder(@Param("tripId") UUID tripId, @Param("id") UUID id, @Param("sortOrder") int sortOrder);
+@Query("""
+    update ItineraryItem i
+    set i.sortOrder = :sortOrder,
+        i.updatedByMemberId = :actorMemberId,
+        i.updatedAt = CURRENT_TIMESTAMP
+    where i.id = :id and i.tripId = :tripId
+    """)
+int updateSortOrder(
+    @Param("tripId") UUID tripId,
+    @Param("id") UUID id,
+    @Param("sortOrder") int sortOrder,
+    @Param("actorMemberId") UUID actorMemberId
+);
 
 @Query("""
     select i from ItineraryItem i

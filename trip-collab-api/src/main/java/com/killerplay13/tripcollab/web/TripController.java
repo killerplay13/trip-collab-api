@@ -5,6 +5,7 @@ import com.killerplay13.tripcollab.service.TripService;
 import jakarta.validation.constraints.NotBlank;
 import java.time.LocalDate;
 import java.util.UUID;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -18,38 +19,43 @@ public class TripController {
   }
 
   @PostMapping
-  public CreateTripResponse create(@RequestBody CreateTripRequest req) {
+  public ResponseEntity<CreateTripResponse> create(@RequestBody CreateTripRequest req) {
     var result = tripService.createTrip(
         req.title(),
         req.startDate(),
         req.endDate(),
         req.timezone(),
-        req.notes()
+        req.notes(),
+        req.creatorNickname()
     );
 
     Trip t = result.trip();
-    return new CreateTripResponse(
+    return ResponseEntity.status(201).body(new CreateTripResponse(
         t.getId(),
         t.getTitle(),
         t.getTimezone(),
         t.getStartDate(),
         t.getEndDate(),
         t.getNotes(),
-        result.token()
-    );
+        result.token(),
+        result.owner().memberToken(),
+        result.owner().member().getId(),
+        result.owner().member().getRole(),
+        result.owner().member().getNickname()
+    ));
   }
 
   @GetMapping("/{tripId}")
-public TripResponse get(@PathVariable UUID tripId) {
+public ResponseEntity<TripResponse> get(@PathVariable UUID tripId) {
   Trip t = tripService.getTrip(tripId);
-  return new TripResponse(
+  return ResponseEntity.ok(new TripResponse(
       t.getId(),
       t.getTitle(),
       t.getTimezone(),
       t.getStartDate(),
       t.getEndDate(),
       t.getNotes()
-  );
+  ));
 }
 
 
@@ -59,7 +65,8 @@ public TripResponse get(@PathVariable UUID tripId) {
       LocalDate startDate,
       LocalDate endDate,
       String timezone,
-      String notes
+      String notes,
+      @NotBlank String creatorNickname
   ) {}
 
   public record CreateTripResponse(
@@ -69,7 +76,11 @@ public TripResponse get(@PathVariable UUID tripId) {
       LocalDate startDate,
       LocalDate endDate,
       String notes,
-      String inviteToken
+      String inviteToken,
+      String memberToken,
+      UUID memberId,
+      String role,
+      String nickname
   ) {}
 
   public record TripResponse(

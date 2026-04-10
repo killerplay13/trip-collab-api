@@ -42,22 +42,22 @@ public class TripMemberController {
 
     // ---------- Endpoints ----------
     @GetMapping
-    public List<MemberResponse> list(@PathVariable UUID tripId) {
-        return tripMemberRepository.findByTripIdAndIsActiveTrueOrderByJoinedAtAsc(tripId)
+    public ResponseEntity<List<MemberResponse>> list(@PathVariable UUID tripId) {
+        return ResponseEntity.ok(tripMemberRepository.findByTripIdAndIsActiveTrueOrderByJoinedAtAsc(tripId)
                 .stream()
                 .map(MemberResponse::from)
-                .toList();
+                .toList());
     }
 
     @PostMapping
-    public CreateMemberResponse create(@PathVariable UUID tripId, @RequestBody CreateMemberRequest req) {
+    public ResponseEntity<CreateMemberResponse> create(@PathVariable UUID tripId, @RequestBody CreateMemberRequest req) {
         var created = tripMemberService.create(tripId, req.nickname(), req.role());
-        return new CreateMemberResponse(MemberResponse.from(created.member()), created.memberToken());
+        return ResponseEntity.status(201).body(new CreateMemberResponse(MemberResponse.from(created.member()), created.memberToken()));
     }
 
     @GetMapping("/{memberId}")
-    public MemberResponse get(@PathVariable UUID tripId, @PathVariable UUID memberId) {
-        return MemberResponse.from(tripMemberService.get(tripId, memberId));
+    public ResponseEntity<MemberResponse> get(@PathVariable UUID tripId, @PathVariable UUID memberId) {
+        return ResponseEntity.ok(MemberResponse.from(tripMemberService.get(tripId, memberId)));
     }
 
     @PatchMapping("/{memberId}")

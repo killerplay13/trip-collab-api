@@ -162,6 +162,7 @@ public class ExpenseService {
             UUID paidByMemberId,
             LocalDate expenseDate,
             String note,
+            UUID actorMemberId,
             SplitMethod splitMethod,
             List<UUID> participantMemberIds,
             List<MemberAmount> customSplits,

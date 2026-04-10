@@ -16,14 +16,16 @@ public class TripService {
 
   private final TripRepository tripRepository;
   private final SharedWalletRepository sharedWalletRepository;
+  private final TripMemberService tripMemberService;
 
-  public TripService(TripRepository tripRepository, SharedWalletRepository sharedWalletRepository) {
+  public TripService(TripRepository tripRepository, SharedWalletRepository sharedWalletRepository, TripMemberService tripMemberService) {
     this.tripRepository = tripRepository;
     this.sharedWalletRepository = sharedWalletRepository;
+    this.tripMemberService = tripMemberService;
   }
 
   @Transactional
-  public CreateTripResult createTrip(String title, LocalDate startDate, LocalDate endDate, String timezone, String notes) {
+  public CreateTripResult createTrip(String title, LocalDate startDate, LocalDate endDate, String timezone, String notes, String creatorNickname) {
     String token = TripTokenUtil.generateToken();
     String tokenHash = TripTokenUtil.sha256Hex(token);
 
@@ -38,7 +40,10 @@ public class TripService {
     t.setCurrency("TWD");
     t = tripRepository.save(t);
     ensureSharedWallet(t);
-    return new CreateTripResult(t, token);
+
+    var memberResult = tripMemberService.create(t.getId(), creatorNickname, "owner");
+
+    return new CreateTripResult(t, token, memberResult);
   }
 
   @Transactional(readOnly = true)
@@ -47,7 +52,7 @@ public class TripService {
         .orElseThrow(() -> new IllegalArgumentException("Trip not found"));
   }
 
-  public record CreateTripResult(Trip trip, String token) {}
+  public record CreateTripResult(Trip trip, String token, TripMemberService.CreatedMember owner) {}
 
   private void ensureSharedWallet(Trip trip) {
     UUID tripId = trip.getId();

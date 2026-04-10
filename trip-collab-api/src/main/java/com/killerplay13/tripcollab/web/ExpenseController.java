@@ -44,7 +44,6 @@ public class ExpenseController {
             UUID paidByMemberId,
             LocalDate expenseDate,
             String note,
-            UUID createdByMemberId,
 
             ExpenseService.SplitMethod splitMethod,
             List<UUID> participantMemberIds,
@@ -109,42 +108,42 @@ public class ExpenseController {
 
     // ---------- Endpoints ----------
     @GetMapping
-    public List<ExpenseResponse> listDay(@PathVariable UUID tripId, @RequestParam LocalDate day) {
-        return expenseService.listDay(tripId, day).stream().map(ExpenseResponse::from).toList();
+    public ResponseEntity<List<ExpenseResponse>> listDay(@PathVariable UUID tripId, @RequestParam LocalDate day) {
+        return ResponseEntity.ok(expenseService.listDay(tripId, day).stream().map(ExpenseResponse::from).toList());
     }
 
     @GetMapping("/all")
-    public Map<LocalDate, List<ExpenseResponse>> listAllGrouped(@PathVariable UUID tripId) {
+    public ResponseEntity<Map<LocalDate, List<ExpenseResponse>>> listAllGrouped(@PathVariable UUID tripId) {
         var all = expenseService.listAll(tripId);
         var map = new LinkedHashMap<LocalDate, List<ExpenseResponse>>();
         for (var e : all) {
             map.computeIfAbsent(e.getExpenseDate(), k -> new ArrayList<>()).add(ExpenseResponse.from(e));
         }
-        return map;
+        return ResponseEntity.ok(map);
     }
 
     @GetMapping("/search")
-    public List<ExpenseResponse> search(
+    public ResponseEntity<List<ExpenseResponse>> search(
             @PathVariable UUID tripId,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) LocalDate from,
             @RequestParam(required = false) LocalDate to
     ) {
-        return expenseService.search(tripId, q, from, to).stream().map(ExpenseResponse::from).toList();
+        return ResponseEntity.ok(expenseService.search(tripId, q, from, to).stream().map(ExpenseResponse::from).toList());
     }
 
     @GetMapping("/{expenseId}")
-    public ExpenseDetailResponse get(@PathVariable UUID tripId, @PathVariable UUID expenseId) {
+    public ResponseEntity<ExpenseDetailResponse> get(@PathVariable UUID tripId, @PathVariable UUID expenseId) {
         var e = expenseService.get(tripId, expenseId);
         var splits = expenseService.getSplits(expenseId).stream().map(SplitResponse::from).toList();
-        return new ExpenseDetailResponse(ExpenseResponse.from(e), splits);
+        return ResponseEntity.ok(new ExpenseDetailResponse(ExpenseResponse.from(e), splits));
     }
 
     @GetMapping("/{expenseId}/splits")
-    public List<ExpenseSplitResponse> listSplits(@PathVariable UUID tripId, @PathVariable UUID expenseId) {
-        return expenseService.getSplitsByExpense(tripId, expenseId).stream()
+    public ResponseEntity<List<ExpenseSplitResponse>> listSplits(@PathVariable UUID tripId, @PathVariable UUID expenseId) {
+        return ResponseEntity.ok(expenseService.getSplitsByExpense(tripId, expenseId).stream()
                 .map(ExpenseSplitResponse::from)
-                .toList();
+                .toList());
     }
 
     @PostMapping
@@ -152,7 +151,13 @@ public class ExpenseController {
      * amount/currency must be in trip base currency.
      * For foreign expenses, provide original fields with fxRate.
      */
-    public ExpenseDetailResponse create(@PathVariable UUID tripId, @RequestBody CreateOrUpdateExpenseRequest req) {
+    public ResponseEntity<ExpenseDetailResponse> create(
+            @PathVariable UUID tripId,
+            @RequestBody CreateOrUpdateExpenseRequest req,
+            HttpServletRequest request
+    ) {
+        UUID actorMemberId = (UUID) request.getAttribute(com.killerplay13.tripcollab.security.MemberTokenFilter.ATTR_MEMBER_ID);
+
         var custom = req.customSplits() == null ? null :
                 req.customSplits().stream().map(x -> new ExpenseService.MemberAmount(x.memberId(), x.amount())).toList();
         var original = req.original();
@@ -170,7 +175,7 @@ public class ExpenseController {
                 req.paidByMemberId(),
                 req.expenseDate(),
                 req.note(),
-                req.createdByMemberId(),
+                actorMemberId,
                 req.splitMethod(),
                 req.participantMemberIds(),
                 custom,
@@ -181,7 +186,7 @@ public class ExpenseController {
         );
 
         var splits = expenseService.getSplits(e.getId()).stream().map(SplitResponse::from).toList();
-        return new ExpenseDetailResponse(ExpenseResponse.from(e), splits);
+        return ResponseEntity.status(201).body(new ExpenseDetailResponse(ExpenseResponse.from(e), splits));
     }
 
     @PutMapping("/{expenseId}")
@@ -202,6 +207,8 @@ public class ExpenseController {
         BigDecimal fxRate = original != null ? original.fxRate() : null;
         String fxSource = original != null ? original.fxSource() : null;
 
+        UUID actorMemberId = (UUID) request.getAttribute(com.killerplay13.tripcollab.security.MemberTokenFilter.ATTR_MEMBER_ID);
+
         var e = expenseService.update(
                 tripId,
                 expenseId,
@@ -211,6 +218,7 @@ public class ExpenseController {
                 req.paidByMemberId(),
                 req.expenseDate(),
                 req.note(),
+                actorMemberId,
                 req.splitMethod(),
                 req.participantMemberIds(),
                 custom,
@@ -251,13 +259,13 @@ public class ExpenseController {
     }
 
     @GetMapping("/summary")
-    public List<ExpenseService.MemberSummary> summary(@PathVariable UUID tripId) {
-        return expenseService.summary(tripId);
+    public ResponseEntity<List<ExpenseService.MemberSummary>> summary(@PathVariable UUID tripId) {
+        return ResponseEntity.ok(expenseService.summary(tripId));
     }
 
     @GetMapping("/settlements")
-    public List<ExpenseService.SettlementTransfer> settlements(@PathVariable UUID tripId) {
-        return expenseService.settlements(tripId);
+    public ResponseEntity<List<ExpenseService.SettlementTransfer>> settlements(@PathVariable UUID tripId) {
+        return ResponseEntity.ok(expenseService.settlements(tripId));
     }
 
 }

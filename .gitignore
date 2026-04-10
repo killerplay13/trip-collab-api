@@ -28,3 +28,6 @@ hs_err_pid*
 
 # Artifacts in this repo
 trip-collab-api.zip
+
+# Local Spring profiles
+trip-collab-api/src/main/resources/application-local.yaml
