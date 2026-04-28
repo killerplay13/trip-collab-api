@@ -27,6 +27,14 @@ public class ExpenseService {
 
     private static final String PAYMENT_SOURCE_PERSONAL = "PERSONAL";
     private static final String PAYMENT_SOURCE_SHARED_WALLET = "SHARED_WALLET";
+    private static final Set<String> VALID_CATEGORIES = Set.of(
+            "FOOD",
+            "CLOTHING",
+            "LODGING",
+            "TRANSPORT",
+            "ENTERTAINMENT",
+            "OTHER"
+    );
 
     private final ExpenseRepository expenseRepository;
     private final ExpenseSplitRepository splitRepository;
@@ -68,6 +76,7 @@ public class ExpenseService {
             String title,
             BigDecimal amount,
             String currency,
+            String category,
             String paymentSource,
             UUID paidByMemberId,
             LocalDate expenseDate,
@@ -82,19 +91,9 @@ public class ExpenseService {
             String fxSource
     ) {
         String normalizedPaymentSource = normalizePaymentSource(paymentSource);
+        String normalizedCategory = normalizeCategory(category);
+        SplitMethod normalizedSplitMethod = splitMethod != null ? splitMethod : SplitMethod.EQUAL;
         boolean isSharedWallet = PAYMENT_SOURCE_SHARED_WALLET.equals(normalizedPaymentSource);
-
-        if (isSharedWallet) {
-            if (originalCurrency == null || originalCurrency.isBlank()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "originalCurrency is required for shared wallet payments");
-            }
-            if (originalAmount == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "originalAmount is required for shared wallet payments");
-            }
-            if (fxRate == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "fxRate is required for shared wallet payments");
-            }
-        }
 
         validateMembers(tripId, paidByMemberId, participantMemberIds, customSplits, !isSharedWallet);
 
@@ -108,6 +107,7 @@ public class ExpenseService {
             );
         }
         String normalizedOriginalCurrency = normalizeCurrencyNullable(originalCurrency);
+        String normalizedFxSource = normalizeFxSource(fxSource);
         UUID paidByForStorage = isSharedWallet ? null : paidByMemberId;
 
         var expense = ExpenseEntity.builder()
@@ -122,14 +122,16 @@ public class ExpenseService {
                 .originalAmount(normalizeMoneyNullable(originalAmount))
                 .originalCurrency(normalizedOriginalCurrency)
                 .fxRate(fxRate)
-                .fxSource(fxSource)
+                .fxSource(normalizedFxSource)
                 .amountOverridden(fx.overridden())
                 .paymentSource(normalizedPaymentSource)
+                .splitMethod(normalizedSplitMethod.name())
+                .category(normalizedCategory)
                 .build();
 
         expense = expenseRepository.save(expense);
 
-        var splits = buildSplits(expense.getId(), fx.finalAmount(), splitMethod, participantMemberIds, customSplits);
+        var splits = buildSplits(expense.getId(), fx.finalAmount(), normalizedSplitMethod, participantMemberIds, customSplits);
         splitRepository.saveAll(splits);
 
         if (isSharedWallet) {
@@ -144,7 +146,7 @@ public class ExpenseService {
                     walletAmount,
                     walletCurrency,
                     walletFxRate,
-                    fxSource,
+                    normalizedFxSource,
                     note
             );
         }
@@ -159,6 +161,8 @@ public class ExpenseService {
             String title,
             BigDecimal amount,
             String currency,
+            String category,
+            String paymentSource,
             UUID paidByMemberId,
             LocalDate expenseDate,
             String note,
@@ -172,51 +176,65 @@ public class ExpenseService {
             String fxSource
     ) {
         var expense = get(tripId, expenseId);
-        if (PAYMENT_SOURCE_SHARED_WALLET.equals(expense.getPaymentSource())) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Editing shared-wallet-paid expenses is not supported in v0.1"
-            );
-        }
 
-        validateMembers(tripId, paidByMemberId, participantMemberIds, customSplits, true);
+        boolean wasSharedWallet = PAYMENT_SOURCE_SHARED_WALLET.equals(expense.getPaymentSource());
+        String normalizedPaymentSource = normalizePaymentSource(paymentSource);
+        String normalizedCategory = normalizeCategory(category);
+        SplitMethod normalizedSplitMethod = splitMethod != null ? splitMethod : SplitMethod.EQUAL;
+        boolean isSharedWallet = PAYMENT_SOURCE_SHARED_WALLET.equals(normalizedPaymentSource);
+
+        validateMembers(tripId, paidByMemberId, participantMemberIds, customSplits, !isSharedWallet);
 
         String tripCurrency = getTripCurrency(tripId);
 
         FxResolved fx = resolveAmountInTripCurrency(tripCurrency, amount, currency, originalAmount, originalCurrency, fxRate);
+        if (isSharedWallet && fx.overridden()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Amount override is not allowed for SHARED_WALLET. Top-level amount must equal original.amount * original.fxRate in trip base currency."
+            );
+        }
+
+        if (wasSharedWallet) {
+            reverseSharedWalletExpense(tripId, expense, actorMemberId, "Reversal before expense update: " + expense.getTitle());
+        }
 
         expense.setTitle(requireNonBlank(title, "title"));
         expense.setAmount(fx.finalAmount());
         expense.setCurrency(tripCurrency);
-        expense.setPaidByMemberId(paidByMemberId);
+        expense.setPaidByMemberId(isSharedWallet ? null : paidByMemberId);
         expense.setExpenseDate(expenseDate != null ? expenseDate : expense.getExpenseDate());
         expense.setNote(note);
         expense.setOriginalAmount(normalizeMoneyNullable(originalAmount));
         expense.setOriginalCurrency(normalizeCurrencyNullable(originalCurrency));
         expense.setFxRate(fxRate);
-        expense.setFxSource(fxSource);
+        expense.setFxSource(normalizeFxSource(fxSource));
         expense.setAmountOverridden(fx.overridden());
+        expense.setPaymentSource(normalizedPaymentSource);
+        expense.setSplitMethod(normalizedSplitMethod.name());
+        expense.setCategory(normalizedCategory);
 
-        expenseRepository.save(expense);
+        expense = expenseRepository.save(expense);
 
         // Replace splits
         splitRepository.deleteByExpenseId(expenseId);
         splitRepository.flush();
-        var splits = buildSplits(expenseId, fx.finalAmount(), splitMethod, participantMemberIds, customSplits);
+        var splits = buildSplits(expenseId, fx.finalAmount(), normalizedSplitMethod, participantMemberIds, customSplits);
         splitRepository.saveAll(splits);
+
+        if (isSharedWallet) {
+            recordSharedWalletExpense(tripId, expense);
+        }
 
         return expense;
     }
 
     @Transactional
-    public void delete(UUID tripId, UUID expenseId) {
+    public void delete(UUID tripId, UUID expenseId, UUID actorMemberId) {
         // ensure exists and belongs to trip
         var expense = get(tripId, expenseId);
         if (PAYMENT_SOURCE_SHARED_WALLET.equals(expense.getPaymentSource())) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Deleting shared-wallet-paid expenses is not supported in v0.1"
-            );
+            reverseSharedWalletExpense(tripId, expense, actorMemberId, "Reversal before expense delete: " + expense.getTitle());
         }
         // splits cascade by FK, but we delete explicitly to be safe/clear
         splitRepository.deleteByExpenseId(expenseId);
@@ -231,6 +249,42 @@ public class ExpenseService {
         var expense = get(tripId, expenseId);
         expense.setExpenseDate(newDate);
         return expenseRepository.save(expense);
+    }
+
+    private void recordSharedWalletExpense(UUID tripId, ExpenseEntity expense) {
+        String tripCurrency = normalizeCurrency(expense.getCurrency());
+        String walletCurrency = expense.getOriginalCurrency() != null ? expense.getOriginalCurrency() : tripCurrency;
+        BigDecimal walletAmount = expense.getOriginalAmount() != null ? expense.getOriginalAmount() : expense.getAmount();
+        BigDecimal walletFxRate = expense.getFxRate() != null ? expense.getFxRate() : BigDecimal.ONE;
+
+        walletCommandService.recordExpense(
+                tripId,
+                expense.getId(),
+                null,
+                walletAmount,
+                walletCurrency,
+                walletFxRate,
+                expense.getFxSource(),
+                expense.getNote()
+        );
+    }
+
+    private void reverseSharedWalletExpense(UUID tripId, ExpenseEntity expense, UUID actorMemberId, String note) {
+        String tripCurrency = normalizeCurrency(expense.getCurrency());
+        String walletCurrency = expense.getOriginalCurrency() != null ? expense.getOriginalCurrency() : tripCurrency;
+        BigDecimal walletAmount = expense.getOriginalAmount() != null ? expense.getOriginalAmount() : expense.getAmount();
+        BigDecimal walletFxRate = expense.getFxRate() != null ? expense.getFxRate() : BigDecimal.ONE;
+
+        walletCommandService.reverseExpense(
+                tripId,
+                expense.getId(),
+                actorMemberId,
+                walletAmount,
+                walletCurrency,
+                walletFxRate,
+                expense.getFxSource(),
+                note
+        );
     }
 
     // ---------- Split building ----------
@@ -566,6 +620,25 @@ public class ExpenseService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "paymentSource is invalid");
         }
         return v;
+    }
+
+    private static String normalizeCategory(String category) {
+        if (category == null || category.isBlank()) {
+            return "OTHER";
+        }
+        String v = category.trim().toUpperCase(Locale.ROOT);
+        if (!VALID_CATEGORIES.contains(v)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "category is invalid");
+        }
+        return v;
+    }
+
+    private static String normalizeFxSource(String fxSource) {
+        if (fxSource == null || fxSource.isBlank()) {
+            return null;
+        }
+        String v = fxSource.trim();
+        return v.length() > 20 ? v.substring(0, 20) : v;
     }
 
 }

@@ -2,6 +2,7 @@ package com.killerplay13.tripcollab.service;
 
 import com.killerplay13.tripcollab.domain.ItineraryItem;
 import com.killerplay13.tripcollab.repo.ItineraryItemRepository;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -101,7 +102,7 @@ public class ItineraryService {
   // （前端只要給 list 順序即可，不用自己算 sortOrder）
   for (int idx = 0; idx < items.size(); idx++) {
     UUID id = items.get(idx).id();
-    repo.updateSortOrder(tripId, id, idx, actorMemberId);
+    repo.updateSortOrder(tripId, id, idx, actorMemberId, Instant.now());
   }
 }
 

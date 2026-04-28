@@ -1,13 +1,17 @@
 package com.killerplay13.tripcollab.service;
 
+import com.killerplay13.tripcollab.domain.SharedWalletEntity;
 import com.killerplay13.tripcollab.domain.WalletTransactionEntity;
 import com.killerplay13.tripcollab.repo.SharedWalletRepository;
+import com.killerplay13.tripcollab.repo.TripRepository;
 import com.killerplay13.tripcollab.repo.WalletBalanceRepository;
 import com.killerplay13.tripcollab.repo.WalletTransactionRepository;
+import com.killerplay13.tripcollab.wallet.dto.WalletAdjustmentRequest;
 import com.killerplay13.tripcollab.wallet.dto.WalletDepositRequest;
 import com.killerplay13.tripcollab.wallet.dto.WalletExchangeRequest;
 import com.killerplay13.tripcollab.wallet.dto.WalletExchangeResponse;
 import com.killerplay13.tripcollab.wallet.dto.WalletTransactionResponse;
+import com.killerplay13.tripcollab.wallet.dto.WalletWithdrawalRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -28,21 +32,21 @@ public class WalletCommandService {
     private final SharedWalletRepository sharedWalletRepository;
     private final WalletBalanceRepository walletBalanceRepository;
     private final WalletTransactionRepository walletTransactionRepository;
+    private final TripRepository tripRepository;
 
     @Transactional
     public WalletTransactionResponse deposit(UUID tripId, UUID actorMemberId, WalletDepositRequest req) {
-        var wallet = sharedWalletRepository.findByTripId(tripId)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND,
-                        "Shared wallet not found for trip " + tripId
-                ));
+        if (req == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required");
+        }
+        var wallet = getOrCreateWallet(tripId);
 
         BigDecimal originalAmount = requirePositiveAmount(req.originalAmount(), "originalAmount")
                 .setScale(2, RoundingMode.HALF_UP);
         BigDecimal fxRate = requirePositiveAmount(req.fxRate(), "fxRate");
         String currency = normalizeCurrency(req.originalCurrency());
 
-        BigDecimal computedBaseAmount = originalAmount.multiply(fxRate);
+        BigDecimal computedBaseAmount = originalAmount.multiply(fxRate).setScale(2, RoundingMode.HALF_UP);
 
         var txn = WalletTransactionEntity.builder()
                 .walletId(wallet.getId())
@@ -61,9 +65,79 @@ public class WalletCommandService {
 
         walletBalanceRepository.upsertBalance(wallet.getId(), currency, originalAmount);
 
-        wallet.setUpdatedAt(Instant.now());
-        sharedWalletRepository.save(wallet);
+        touch(wallet);
 
+        return toResponse(txn);
+    }
+
+    @Transactional
+    public WalletTransactionResponse withdraw(UUID tripId, UUID actorMemberId, WalletWithdrawalRequest req) {
+        if (req == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required");
+        }
+        var wallet = getOrCreateWallet(tripId);
+
+        BigDecimal originalAmount = requirePositiveAmount(req.originalAmount(), "originalAmount")
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal fxRate = requirePositiveAmount(req.fxRate(), "fxRate");
+        String currency = normalizeCurrency(req.originalCurrency());
+        BigDecimal computedBaseAmount = originalAmount.multiply(fxRate).setScale(2, RoundingMode.HALF_UP);
+
+        debitOrThrow(wallet.getId(), currency, originalAmount);
+
+        var txn = WalletTransactionEntity.builder()
+                .walletId(wallet.getId())
+                .txnType("WITHDRAW")
+                .direction("OUT")
+                .originalAmount(originalAmount)
+                .originalCurrency(currency)
+                .fxRate(fxRate)
+                .computedBaseAmount(computedBaseAmount)
+                .memberId(actorMemberId)
+                .fxSource(req.fxSource())
+                .note(req.note())
+                .build();
+
+        txn = walletTransactionRepository.save(txn);
+        touch(wallet);
+        return toResponse(txn);
+    }
+
+    @Transactional
+    public WalletTransactionResponse adjust(UUID tripId, UUID actorMemberId, WalletAdjustmentRequest req) {
+        if (req == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required");
+        }
+        var wallet = getOrCreateWallet(tripId);
+
+        String direction = normalizeDirection(req.direction());
+        BigDecimal originalAmount = requirePositiveAmount(req.originalAmount(), "originalAmount")
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal fxRate = requirePositiveAmount(req.fxRate(), "fxRate");
+        String currency = normalizeCurrency(req.originalCurrency());
+        BigDecimal computedBaseAmount = originalAmount.multiply(fxRate).setScale(2, RoundingMode.HALF_UP);
+
+        if ("OUT".equals(direction)) {
+            debitOrThrow(wallet.getId(), currency, originalAmount);
+        } else {
+            walletBalanceRepository.upsertBalance(wallet.getId(), currency, originalAmount);
+        }
+
+        var txn = WalletTransactionEntity.builder()
+                .walletId(wallet.getId())
+                .txnType("ADJUSTMENT")
+                .direction(direction)
+                .originalAmount(originalAmount)
+                .originalCurrency(currency)
+                .fxRate(fxRate)
+                .computedBaseAmount(computedBaseAmount)
+                .memberId(actorMemberId)
+                .fxSource(req.fxSource())
+                .note(req.note())
+                .build();
+
+        txn = walletTransactionRepository.save(txn);
+        touch(wallet);
         return toResponse(txn);
     }
 
@@ -78,21 +152,10 @@ public class WalletCommandService {
             String fxSource,
             String note
     ) {
-        var wallet = sharedWalletRepository.findByTripId(tripId)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND,
-                        "Shared wallet not found for trip " + tripId
-                ));
+        var wallet = getOrCreateWallet(tripId);
 
         if (expenseId == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "expenseId is required");
-        }
-
-        if (walletTransactionRepository.existsByExpenseIdAndTxnType(expenseId, "EXPENSE")) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Wallet expense transaction already exists"
-            );
         }
 
         String currency = normalizeCurrency(originalCurrency);
@@ -101,13 +164,7 @@ public class WalletCommandService {
         BigDecimal rate = requirePositiveAmount(fxRate, "fxRate");
         BigDecimal computedBase = amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
 
-        int updated = walletBalanceRepository.debitIfSufficient(wallet.getId(), currency, amount);
-        if (updated == 0) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Insufficient wallet balance in " + currency
-            );
-        }
+        debitOrThrow(wallet.getId(), currency, amount);
 
         var txn = WalletTransactionEntity.builder()
                 .walletId(wallet.getId())
@@ -125,19 +182,58 @@ public class WalletCommandService {
 
         txn = walletTransactionRepository.save(txn);
 
-        wallet.setUpdatedAt(Instant.now());
-        sharedWalletRepository.save(wallet);
+        touch(wallet);
 
         return toResponse(txn);
     }
 
     @Transactional
+    public WalletTransactionResponse reverseExpense(
+            UUID tripId,
+            UUID expenseId,
+            UUID actorMemberId,
+            BigDecimal originalAmount,
+            String originalCurrency,
+            BigDecimal fxRate,
+            String fxSource,
+            String note
+    ) {
+        var wallet = getOrCreateWallet(tripId);
+
+        if (expenseId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "expenseId is required");
+        }
+
+        String currency = normalizeCurrency(originalCurrency);
+        BigDecimal amount = requirePositiveAmount(originalAmount, "originalAmount")
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal rate = requirePositiveAmount(fxRate, "fxRate");
+        BigDecimal computedBase = amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+
+        walletBalanceRepository.upsertBalance(wallet.getId(), currency, amount);
+
+        var txn = WalletTransactionEntity.builder()
+                .walletId(wallet.getId())
+                .txnType("ADJUSTMENT")
+                .direction("IN")
+                .originalAmount(amount)
+                .originalCurrency(currency)
+                .fxRate(rate)
+                .computedBaseAmount(computedBase)
+                .memberId(actorMemberId)
+                .expenseId(expenseId)
+                .fxSource(fxSource)
+                .note(note)
+                .build();
+
+        txn = walletTransactionRepository.save(txn);
+        touch(wallet);
+        return toResponse(txn);
+    }
+
+    @Transactional
     public WalletExchangeResponse exchange(UUID tripId, UUID actorMemberId, WalletExchangeRequest req) {
-        var wallet = sharedWalletRepository.findByTripId(tripId)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND,
-                        "Shared wallet not found for trip " + tripId
-                ));
+        var wallet = getOrCreateWallet(tripId);
 
         if (req == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required");
@@ -162,13 +258,7 @@ public class WalletCommandService {
         BigDecimal outBase = fromAmount.multiply(fromFxRate).setScale(2, RoundingMode.HALF_UP);
         BigDecimal inBase = toAmount.multiply(toFxRate).setScale(2, RoundingMode.HALF_UP);
 
-        int updated = walletBalanceRepository.debitIfSufficient(wallet.getId(), fromCurrency, fromAmount);
-        if (updated == 0) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Insufficient wallet balance in " + fromCurrency
-            );
-        }
+        debitOrThrow(wallet.getId(), fromCurrency, fromAmount);
 
         UUID exchangeGroupId = UUID.randomUUID();
 
@@ -205,14 +295,40 @@ public class WalletCommandService {
 
         walletBalanceRepository.upsertBalance(wallet.getId(), toCurrency, toAmount);
 
-        wallet.setUpdatedAt(Instant.now());
-        sharedWalletRepository.save(wallet);
+        touch(wallet);
 
         return new WalletExchangeResponse(
                 exchangeGroupId,
                 wallet.getId(),
                 List.of(toResponse(outTxn), toResponse(inTxn))
         );
+    }
+
+    private SharedWalletEntity getOrCreateWallet(UUID tripId) {
+        return sharedWalletRepository.findByTripId(tripId).orElseGet(() -> {
+            var trip = tripRepository.findById(tripId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trip not found"));
+            var wallet = SharedWalletEntity.builder()
+                    .tripId(tripId)
+                    .baseCurrency(normalizeCurrency(trip.getCurrency(), "trip.currency"))
+                    .build();
+            return sharedWalletRepository.save(wallet);
+        });
+    }
+
+    private void debitOrThrow(Long walletId, String currency, BigDecimal amount) {
+        int updated = walletBalanceRepository.debitIfSufficient(walletId, currency, amount);
+        if (updated == 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Insufficient wallet balance in " + currency
+            );
+        }
+    }
+
+    private void touch(SharedWalletEntity wallet) {
+        wallet.setUpdatedAt(Instant.now());
+        sharedWalletRepository.save(wallet);
     }
 
     private static BigDecimal requirePositiveAmount(BigDecimal v, String field) {
@@ -234,6 +350,17 @@ public class WalletCommandService {
         String v = ccy.trim().toUpperCase(Locale.ROOT);
         if (v.length() != 3) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be 3 letters");
+        }
+        return v;
+    }
+
+    private static String normalizeDirection(String direction) {
+        if (direction == null || direction.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "direction is required");
+        }
+        String v = direction.trim().toUpperCase(Locale.ROOT);
+        if (!"IN".equals(v) && !"OUT".equals(v)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "direction must be IN or OUT");
         }
         return v;
     }

@@ -4,12 +4,14 @@ import com.killerplay13.tripcollab.service.WalletCommandService;
 import com.killerplay13.tripcollab.service.WalletQueryService;
 import com.killerplay13.tripcollab.security.AuthGuard;
 import com.killerplay13.tripcollab.security.MemberTokenFilter;
+import com.killerplay13.tripcollab.wallet.dto.WalletAdjustmentRequest;
 import com.killerplay13.tripcollab.wallet.dto.WalletDepositRequest;
 import com.killerplay13.tripcollab.wallet.dto.WalletExchangeRequest;
 import com.killerplay13.tripcollab.wallet.dto.WalletExchangeResponse;
 import com.killerplay13.tripcollab.wallet.dto.WalletSummaryResponse;
 import com.killerplay13.tripcollab.wallet.dto.WalletTransactionListResponse;
 import com.killerplay13.tripcollab.wallet.dto.WalletTransactionResponse;
+import com.killerplay13.tripcollab.wallet.dto.WalletWithdrawalRequest;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -74,6 +76,32 @@ public class WalletController {
         if (guard != null) return guard;
         UUID actorMemberId = (UUID) request.getAttribute(MemberTokenFilter.ATTR_MEMBER_ID);
         var result = walletCommandService.deposit(tripId, actorMemberId, req);
+        return ResponseEntity.status(201).body(result);
+    }
+
+    @PostMapping("/withdrawals")
+    public ResponseEntity<?> withdraw(
+            @PathVariable UUID tripId,
+            @RequestBody WalletWithdrawalRequest req,
+            HttpServletRequest request
+    ) {
+        ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+        if (guard != null) return guard;
+        UUID actorMemberId = (UUID) request.getAttribute(MemberTokenFilter.ATTR_MEMBER_ID);
+        var result = walletCommandService.withdraw(tripId, actorMemberId, req);
+        return ResponseEntity.status(201).body(result);
+    }
+
+    @PostMapping("/adjustments")
+    public ResponseEntity<?> adjust(
+            @PathVariable UUID tripId,
+            @RequestBody WalletAdjustmentRequest req,
+            HttpServletRequest request
+    ) {
+        ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+        if (guard != null) return guard;
+        UUID actorMemberId = (UUID) request.getAttribute(MemberTokenFilter.ATTR_MEMBER_ID);
+        var result = walletCommandService.adjust(tripId, actorMemberId, req);
         return ResponseEntity.status(201).body(result);
     }
 

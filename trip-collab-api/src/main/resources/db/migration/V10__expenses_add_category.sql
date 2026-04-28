@@ -1,0 +1,10 @@
+ALTER TABLE expenses
+  ADD COLUMN IF NOT EXISTS category VARCHAR(30) NOT NULL DEFAULT 'OTHER';
+
+ALTER TABLE expenses
+  DROP CONSTRAINT IF EXISTS chk_expenses_category;
+
+ALTER TABLE expenses
+  ADD CONSTRAINT chk_expenses_category
+  CHECK (category IN ('FOOD','CLOTHING','LODGING','TRANSPORT','ENTERTAINMENT','OTHER'));
+

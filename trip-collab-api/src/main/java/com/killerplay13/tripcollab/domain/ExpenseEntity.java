@@ -58,11 +58,13 @@ public class ExpenseEntity {
         if (expenseDate == null) expenseDate = LocalDate.now();
         if (currency == null || currency.isBlank()) currency = "TWD";
         if (paymentSource == null || paymentSource.isBlank()) paymentSource = "PERSONAL";
+        if (category == null || category.isBlank()) category = "OTHER";
     }
 
     @PreUpdate
     void preUpdate() {
         updatedAt = Instant.now();
+        if (category == null || category.isBlank()) category = "OTHER";
     }
 
     @Column(name = "original_amount", precision = 12, scale = 2)
@@ -82,5 +84,11 @@ public class ExpenseEntity {
 
     @Column(name = "payment_source", nullable = false, length = 20)
     private String paymentSource = "PERSONAL";
+
+    @Column(name = "split_method", nullable = false, length = 20)
+    private String splitMethod = "EQUAL";
+
+    @Column(name = "category", nullable = false, length = 30)
+    private String category = "OTHER";
 
 }

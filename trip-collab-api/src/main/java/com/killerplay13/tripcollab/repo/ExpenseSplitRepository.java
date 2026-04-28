@@ -16,6 +16,7 @@ public interface ExpenseSplitRepository extends JpaRepository<ExpenseSplitEntity
     from ExpenseSplitEntity s, ExpenseEntity e
     where s.expenseId = e.id
       and e.tripId = :tripId
+      and e.paymentSource = 'PERSONAL'
     group by s.memberId
 """)
     List<Object[]> sumOwedByMember(@Param("tripId") UUID tripId);

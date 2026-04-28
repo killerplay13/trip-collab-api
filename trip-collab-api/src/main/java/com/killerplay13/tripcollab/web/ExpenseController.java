@@ -33,13 +33,14 @@ public class ExpenseController {
     /**
      * amount/currency: always in trip base currency (used for settlements).
      * original.amount/original.currency/fxRate: for foreign currency expenses; system converts to base.
-     * If paymentSource = SHARED_WALLET, original fields are required.
-     * For SHARED_WALLET, amount override is not allowed; amount must equal original converted amount.
+     * If paymentSource = SHARED_WALLET, paidByMemberId is omitted and the shared wallet pays the expense.
+     * For SHARED_WALLET with original fields, amount override is not allowed.
      */
     public record CreateOrUpdateExpenseRequest(
             String title,
             BigDecimal amount,
             String currency,
+            String category,
             String paymentSource,
             UUID paidByMemberId,
             LocalDate expenseDate,
@@ -66,7 +67,10 @@ public class ExpenseController {
             BigDecimal fxRate,
             String fxSource,
             BigDecimal computedAmount,
-            Boolean amountOverridden
+            Boolean amountOverridden,
+            String paymentSource,
+            String splitMethod,
+            String category
     ) {
         static ExpenseResponse from(ExpenseEntity e) {
             BigDecimal computed = null;
@@ -85,7 +89,10 @@ public class ExpenseController {
                     e.getFxRate(),
                     e.getFxSource(),
                     computed,
-                    e.getAmountOverridden()
+                    e.getAmountOverridden(),
+                    e.getPaymentSource(),
+                    e.getSplitMethod(),
+                    e.getCategory() == null || e.getCategory().isBlank() ? "OTHER" : e.getCategory()
             );
         }
     }
@@ -171,6 +178,7 @@ public class ExpenseController {
                 req.title(),
                 req.amount(),
                 req.currency(),
+                req.category(),
                 req.paymentSource(),
                 req.paidByMemberId(),
                 req.expenseDate(),
@@ -215,6 +223,8 @@ public class ExpenseController {
                 req.title(),
                 req.amount(),
                 req.currency(),
+                req.category(),
+                req.paymentSource(),
                 req.paidByMemberId(),
                 req.expenseDate(),
                 req.note(),
@@ -241,7 +251,8 @@ public class ExpenseController {
         ResponseEntity<String> guard = AuthGuard.requireOwner(request);
         if (guard != null) return guard;
 
-        expenseService.delete(tripId, expenseId);
+        UUID actorMemberId = (UUID) request.getAttribute(com.killerplay13.tripcollab.security.MemberTokenFilter.ATTR_MEMBER_ID);
+        expenseService.delete(tripId, expenseId, actorMemberId);
         return ResponseEntity.ok().build();
     }
 

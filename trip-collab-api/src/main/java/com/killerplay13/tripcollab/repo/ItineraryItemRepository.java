@@ -1,6 +1,7 @@
 package com.killerplay13.tripcollab.repo;
 
 import com.killerplay13.tripcollab.domain.ItineraryItem;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -32,14 +33,15 @@ List<UUID> findIdsByTripIdAndDayDate(@Param("tripId") UUID tripId, @Param("dayDa
     update ItineraryItem i
     set i.sortOrder = :sortOrder,
         i.updatedByMemberId = :actorMemberId,
-        i.updatedAt = CURRENT_TIMESTAMP
+        i.updatedAt = :updatedAt
     where i.id = :id and i.tripId = :tripId
     """)
 int updateSortOrder(
     @Param("tripId") UUID tripId,
     @Param("id") UUID id,
     @Param("sortOrder") int sortOrder,
-    @Param("actorMemberId") UUID actorMemberId
+    @Param("actorMemberId") UUID actorMemberId,
+    @Param("updatedAt") Instant updatedAt
 );
 
 @Query("""
