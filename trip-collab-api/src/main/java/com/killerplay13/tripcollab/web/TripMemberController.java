@@ -67,7 +67,7 @@ public class TripMemberController {
             @RequestBody PatchMemberRequest req,
             HttpServletRequest request
     ) {
-        ResponseEntity<String> guard = AuthGuard.requireOwner(request);
+        ResponseEntity<String> guard = AuthGuard.requireOwnerOrSelf(request, memberId);
         if (guard != null) return guard;
         var updated = tripMemberService.update(tripId, memberId, req.nickname(), req.isActive());
         return ResponseEntity.ok(MemberResponse.from(updated));

@@ -32,6 +32,20 @@ public final class AuthGuard {
     return null;
   }
 
+  public static ResponseEntity<String> requireOwnerOrSelf(HttpServletRequest request, UUID targetMemberId) {
+    ResponseEntity<String> memberGuard = requireMember(request);
+    if (memberGuard != null) return memberGuard;
+
+    UUID currentMemberId = (UUID) request.getAttribute(MemberTokenFilter.ATTR_MEMBER_ID);
+    String role = (String) request.getAttribute(MemberTokenFilter.ATTR_ROLE);
+
+    if (!"owner".equals(role) && !targetMemberId.equals(currentMemberId)) {
+      return buildErrorResponse(request, 403, "Owner role or self modification required");
+    }
+
+    return null;
+  }
+
   private static ResponseEntity<String> buildErrorResponse(HttpServletRequest request, int status, String message) {
     String body = FilterErrorUtil.buildJsonError(request, status, message);
     return ResponseEntity.status(status)

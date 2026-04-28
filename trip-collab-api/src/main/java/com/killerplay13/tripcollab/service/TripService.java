@@ -25,7 +25,7 @@ public class TripService {
   }
 
   @Transactional
-  public CreateTripResult createTrip(String title, LocalDate startDate, LocalDate endDate, String timezone, String notes, String creatorNickname) {
+  public CreateTripResult createTrip(String title, LocalDate startDate, LocalDate endDate, String timezone, String notes, String creatorNickname, String currency) {
     String token = TripTokenUtil.generateToken();
     String tokenHash = TripTokenUtil.sha256Hex(token);
 
@@ -37,7 +37,7 @@ public class TripService {
     t.setNotes(notes);
     t.setInviteTokenHash(tokenHash);
     t.setInviteEnabled(true);
-    t.setCurrency("TWD");
+    t.setCurrency(currency != null && !currency.isBlank() ? currency.trim().toUpperCase() : "TWD");
     t = tripRepository.save(t);
     ensureSharedWallet(t);
 
@@ -50,6 +50,18 @@ public class TripService {
   public Trip getTrip(UUID id) {
     return tripRepository.findById(id)
         .orElseThrow(() -> new IllegalArgumentException("Trip not found"));
+  }
+
+  @Transactional
+  public Trip updateTrip(UUID id, String title, LocalDate startDate, LocalDate endDate, String timezone, String notes) {
+    Trip t = tripRepository.findById(id)
+        .orElseThrow(() -> new IllegalArgumentException("Trip not found"));
+    if (title != null && !title.isBlank()) t.setTitle(title);
+    if (startDate != null) t.setStartDate(startDate);
+    if (endDate != null) t.setEndDate(endDate);
+    if (timezone != null && !timezone.isBlank()) t.setTimezone(timezone);
+    if (notes != null) t.setNotes(notes);
+    return tripRepository.save(t);
   }
 
   public record CreateTripResult(Trip trip, String token, TripMemberService.CreatedMember owner) {}

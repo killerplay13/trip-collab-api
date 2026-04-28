@@ -19,6 +19,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
 public class SecurityConfig {
+  private static final List<String> DEFAULT_ALLOWED_ORIGINS =
+      List.of("http://localhost:5173", "http://localhost:5174");
 
   @Bean
   public SecurityFilterChain filterChain(
@@ -68,14 +70,14 @@ public class SecurityConfig {
 
   private List<String> parseAllowedOrigins(String rawOrigins) {
     if (rawOrigins == null || rawOrigins.isBlank()) {
-      return List.of("http://localhost:5173");
+      return DEFAULT_ALLOWED_ORIGINS;
     }
     List<String> origins = Arrays.stream(rawOrigins.split(","))
       .map(String::trim)
       .filter(s -> !s.isBlank())
       .collect(Collectors.toList());
     if (origins.isEmpty()) {
-      return List.of("http://localhost:5173");
+      return DEFAULT_ALLOWED_ORIGINS;
     }
     return origins;
   }

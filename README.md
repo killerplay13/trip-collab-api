@@ -46,10 +46,22 @@ Client (Web/Mobile)
 
 ### Requirements
 - Java 17+
-- Postgres (Railway)
+- Postgres
+
+### Default local database
+The repo includes a local Postgres setup at `trip-collab-local-db/docker-compose.yml`.
+
+Default Spring datasource values now match that compose file:
+```text
+DB_URL=jdbc:postgresql://localhost:5432/trip_collab
+DB_USER=postgres
+DB_PASSWORD=postgres
+```
+
+So if that local database is running, `./mvnw spring-boot:run` works without extra env vars.
 
 ### Environment Variables
-> Use Railway **Public** connection info locally (NOT `postgres.railway.internal`).
+Override the defaults when you want to connect to Railway. Use Railway **Public** connection info locally (NOT `postgres.railway.internal`).
 
 Example:
 ```bash
@@ -64,9 +76,9 @@ Make sure placeholders resolve correctly:
 ```yaml
 spring:
   datasource:
-    url: ${DB_URL:}
-    username: ${DB_USER:}
-    password: ${DB_PASSWORD:}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/trip_collab}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
 
   jpa:

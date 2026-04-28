@@ -444,7 +444,10 @@ public class ExpenseService {
             BigDecimal fxRate
     ) {
         String normalizedReqCurrency = normalizeCurrencyNullable(reqCurrency);
-        if (normalizedReqCurrency == null || !normalizedReqCurrency.equals(tripCurrency)) {
+        if (normalizedReqCurrency == null) {
+            normalizedReqCurrency = tripCurrency;
+        }
+        if (!normalizedReqCurrency.equals(tripCurrency)) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
                     "currency must equal trip base currency (" + tripCurrency + "). Use originalAmount/originalCurrency + fxRate for foreign expenses."
