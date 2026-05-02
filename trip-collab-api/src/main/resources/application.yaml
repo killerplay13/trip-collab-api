@@ -1,14 +1,14 @@
 server:
-  port: 8082
+  port: ${PORT:8082}
 
 spring:
   application:
     name: trip-collab-api
 
   datasource:
-    url: ${DB_URL}
-    username: ${DB_USER}
-    password: ${DB_PASSWORD}
+    url: "${DB_URL:jdbc:postgresql://${PGHOST:localhost}:${PGPORT:5432}/${PGDATABASE:trip_collab}}"
+    username: "${DB_USER:${PGUSER:postgres}}"
+    password: "${DB_PASSWORD:${PGPASSWORD:postgres}}"
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -23,7 +23,3 @@ spring:
     baseline-on-migrate: true
     baseline-version: 1
     baseline-description: "baseline existing schema"
-
-    mvc:
-      servlet:
-        path: /
