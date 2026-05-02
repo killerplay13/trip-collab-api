@@ -1,7 +1,9 @@
 package com.killerplay13.tripcollab.config;
 
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import com.killerplay13.tripcollab.repo.TripMemberRepository;
 import com.killerplay13.tripcollab.repo.TripRepository;
@@ -10,7 +12,6 @@ import com.killerplay13.tripcollab.security.TripTokenFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -20,22 +21,24 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
 public class SecurityConfig {
-  private static final List<String> DEFAULT_ALLOWED_ORIGINS =
+  private static final List<String> DEFAULT_ALLOWED_ORIGIN_PATTERNS =
       List.of(
           "http://localhost:5173",
           "http://localhost:5174",
-          "https://trip-collab-web.vercel.app"
+          "https://trip-collab-web.vercel.app",
+          "https://*.vercel.app"
       );
 
   @Bean
   public SecurityFilterChain filterChain(
       HttpSecurity http,
       TripTokenFilter tripTokenFilter,
-      MemberTokenFilter memberTokenFilter
+      MemberTokenFilter memberTokenFilter,
+      CorsConfigurationSource corsConfigurationSource
   ) throws Exception {
     http
       .csrf(csrf -> csrf.disable())
-      .cors(Customizer.withDefaults())
+      .cors(cors -> cors.configurationSource(corsConfigurationSource))
       .authorizeHttpRequests(auth -> auth
         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
         .anyRequest().permitAll()
@@ -62,30 +65,28 @@ public class SecurityConfig {
   public CorsConfigurationSource corsConfigurationSource() {
     CorsConfiguration config = new CorsConfiguration();
     config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-    config.setAllowedHeaders(List.of("Content-Type", "X-Trip-Token", "X-Member-Token"));
+    config.setAllowedHeaders(List.of("Content-Type", "X-Trip-Token", "X-Member-Token", "Authorization"));
     config.setExposedHeaders(List.of("X-Trip-Token", "X-Member-Token"));
     config.setAllowCredentials(false);
 
     String rawOrigins = System.getenv("CORS_ALLOWED_ORIGINS");
-    List<String> origins = parseAllowedOrigins(rawOrigins);
-    config.setAllowedOrigins(origins);
+    List<String> originPatterns = parseAllowedOriginPatterns(rawOrigins);
+    config.setAllowedOriginPatterns(originPatterns);
 
     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
     source.registerCorsConfiguration("/**", config);
     return source;
   }
 
-  private List<String> parseAllowedOrigins(String rawOrigins) {
+  private List<String> parseAllowedOriginPatterns(String rawOrigins) {
+    Set<String> origins = new LinkedHashSet<>(DEFAULT_ALLOWED_ORIGIN_PATTERNS);
     if (rawOrigins == null || rawOrigins.isBlank()) {
-      return DEFAULT_ALLOWED_ORIGINS;
+      return List.copyOf(origins);
     }
-    List<String> origins = Arrays.stream(rawOrigins.split(","))
+    origins.addAll(Arrays.stream(rawOrigins.split(","))
       .map(String::trim)
       .filter(s -> !s.isBlank())
-      .collect(Collectors.toList());
-    if (origins.isEmpty()) {
-      return DEFAULT_ALLOWED_ORIGINS;
-    }
-    return origins;
+      .collect(Collectors.toList()));
+    return List.copyOf(origins);
   }
 }
