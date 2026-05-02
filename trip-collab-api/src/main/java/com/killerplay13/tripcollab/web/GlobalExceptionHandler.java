@@ -63,6 +63,9 @@ public class GlobalExceptionHandler {
             case 403 -> "Forbidden";
             case 404 -> "Not Found";
             case 409 -> "Conflict";
+            case 502 -> "Bad Gateway";
+            case 503 -> "Service Unavailable";
+            case 504 -> "Gateway Timeout";
             case 500 -> "Internal Server Error";
             default -> "Error";
         };
