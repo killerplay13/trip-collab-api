@@ -9,6 +9,7 @@ import com.killerplay13.tripcollab.security.MemberTokenFilter;
 import com.killerplay13.tripcollab.security.TripTokenFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
@@ -20,7 +21,11 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration
 public class SecurityConfig {
   private static final List<String> DEFAULT_ALLOWED_ORIGINS =
-      List.of("http://localhost:5173", "http://localhost:5174");
+      List.of(
+          "http://localhost:5173",
+          "http://localhost:5174",
+          "https://trip-collab-web.vercel.app"
+      );
 
   @Bean
   public SecurityFilterChain filterChain(
@@ -32,6 +37,7 @@ public class SecurityConfig {
       .csrf(csrf -> csrf.disable())
       .cors(Customizer.withDefaults())
       .authorizeHttpRequests(auth -> auth
+        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
         .anyRequest().permitAll()
       )
       .addFilterBefore(tripTokenFilter, UsernamePasswordAuthenticationFilter.class)
@@ -57,6 +63,7 @@ public class SecurityConfig {
     CorsConfiguration config = new CorsConfiguration();
     config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
     config.setAllowedHeaders(List.of("Content-Type", "X-Trip-Token", "X-Member-Token"));
+    config.setExposedHeaders(List.of("X-Trip-Token", "X-Member-Token"));
     config.setAllowCredentials(false);
 
     String rawOrigins = System.getenv("CORS_ALLOWED_ORIGINS");
