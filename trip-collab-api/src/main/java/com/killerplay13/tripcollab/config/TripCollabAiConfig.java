@@ -19,13 +19,17 @@ public class TripCollabAiConfig {
     requestFactory.setReadTimeout(timeout);
 
     return builder
-        .baseUrl(normalizeBaseUrl(properties.getBaseUrl()))
+        .baseUrl(normalizeBaseUrl(properties))
         .requestFactory(requestFactory)
         .build();
   }
 
-  private static String normalizeBaseUrl(String baseUrl) {
+  private static String normalizeBaseUrl(TripCollabAiProperties properties) {
+    String baseUrl = properties.getBaseUrl();
     if (baseUrl == null || baseUrl.isBlank()) {
+      if (properties.isEnabled()) {
+        throw new IllegalStateException("TRIP_COLLAB_AI_BASE_URL is required when TRIP_COLLAB_AI_ENABLED=true");
+      }
       return "http://localhost:8000";
     }
     String trimmed = baseUrl.trim();

@@ -7,8 +7,8 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "trip-collab-ai")
 public class TripCollabAiProperties {
   private boolean enabled;
-  private String baseUrl = "http://localhost:8000";
-  private int timeoutSeconds = 10;
+  private String baseUrl = "";
+  private int timeoutSeconds = 45;
 
   public boolean isEnabled() {
     return enabled;
