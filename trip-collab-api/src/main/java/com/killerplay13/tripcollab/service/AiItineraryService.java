@@ -3,7 +3,9 @@ package com.killerplay13.tripcollab.service;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.killerplay13.tripcollab.config.TripCollabAiProperties;
+import com.killerplay13.tripcollab.domain.ItineraryItem;
 import com.killerplay13.tripcollab.domain.Trip;
+import com.killerplay13.tripcollab.repo.ItineraryItemRepository;
 import com.killerplay13.tripcollab.repo.TripMemberRepository;
 import com.killerplay13.tripcollab.repo.TripRepository;
 import com.killerplay13.tripcollab.web.dto.ai.AiItineraryDraftDay;
@@ -32,21 +34,26 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class AiItineraryService {
   private static final String DEFAULT_LANGUAGE = "zh-TW";
+  private static final int MAX_EXISTING_ITINERARY_ITEMS = 100;
+  private static final int MAX_EXISTING_NOTE_LENGTH = 120;
 
   private final TripCollabAiProperties properties;
   private final TripRepository tripRepository;
   private final TripMemberRepository tripMemberRepository;
+  private final ItineraryItemRepository itineraryItemRepository;
   private final RestClient restClient;
 
   public AiItineraryService(
       TripCollabAiProperties properties,
       TripRepository tripRepository,
       TripMemberRepository tripMemberRepository,
+      ItineraryItemRepository itineraryItemRepository,
       @Qualifier("tripCollabAiRestClient") RestClient restClient
   ) {
     this.properties = properties;
     this.tripRepository = tripRepository;
     this.tripMemberRepository = tripMemberRepository;
+    this.itineraryItemRepository = itineraryItemRepository;
     this.restClient = restClient;
   }
 
@@ -62,7 +69,8 @@ public class AiItineraryService {
     Trip trip = tripRepository.findById(tripId)
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trip not found"));
 
-    FastApiItineraryGenerateRequest fastApiRequest = toFastApiRequest(trip, request);
+    List<FastApiExistingItineraryItem> existingItinerary = existingItineraryContext(trip.getId());
+    FastApiItineraryGenerateRequest fastApiRequest = toFastApiRequest(trip, request, existingItinerary);
     FastApiResponse fastApiResponse = callFastApi(fastApiRequest);
     FastApiItineraryGenerateData data = validateResponse(fastApiResponse);
 
@@ -76,7 +84,11 @@ public class AiItineraryService {
     );
   }
 
-  private FastApiItineraryGenerateRequest toFastApiRequest(Trip trip, AiItineraryGenerateRequest request) {
+  private FastApiItineraryGenerateRequest toFastApiRequest(
+      Trip trip,
+      AiItineraryGenerateRequest request,
+      List<FastApiExistingItineraryItem> existingItinerary
+  ) {
     LocalDate startDate = request.from() != null ? request.from() : trip.getStartDate();
     LocalDate endDate = request.to() != null ? request.to() : trip.getEndDate();
 
@@ -107,8 +119,23 @@ public class AiItineraryService {
         normalizeList(request.mustVisitPlaces()),
         normalizeList(request.avoidPlaces()),
         blankToNull(request.notes()),
-        language
+        language,
+        existingItinerary,
+        true
     );
+  }
+
+  private List<FastApiExistingItineraryItem> existingItineraryContext(UUID tripId) {
+    return itineraryItemRepository.findAllByTrip(tripId).stream()
+        .filter(item -> blankToNull(item.getTitle()) != null)
+        .limit(MAX_EXISTING_ITINERARY_ITEMS)
+        .map(item -> new FastApiExistingItineraryItem(
+            item.getDayDate(),
+            item.getTitle().trim(),
+            blankToNull(item.getLocationName()),
+            truncate(blankToNull(item.getNote()), MAX_EXISTING_NOTE_LENGTH)
+        ))
+        .toList();
   }
 
   private FastApiResponse callFastApi(FastApiItineraryGenerateRequest request) {
@@ -190,6 +217,13 @@ public class AiItineraryService {
     return normalized == null ? defaultValue : normalized;
   }
 
+  private static String truncate(String value, int maxLength) {
+    if (value == null || value.length() <= maxLength) {
+      return value;
+    }
+    return value.substring(0, maxLength);
+  }
+
   private static boolean isTimeout(Throwable throwable) {
     Throwable current = throwable;
     while (current != null) {
@@ -217,7 +251,17 @@ public class AiItineraryService {
       @JsonProperty("must_visit_places") List<String> mustVisitPlaces,
       @JsonProperty("avoid_places") List<String> avoidPlaces,
       String notes,
-      String language
+      String language,
+      @JsonProperty("existing_itinerary") List<FastApiExistingItineraryItem> existingItinerary,
+      @JsonProperty("avoid_duplicate_places") boolean avoidDuplicatePlaces
+  ) {}
+
+  private record FastApiExistingItineraryItem(
+      @JsonFormat(shape = JsonFormat.Shape.STRING)
+      @JsonProperty("day_date") LocalDate dayDate,
+      String title,
+      @JsonProperty("location_name") String locationName,
+      String note
   ) {}
 
   private record FastApiResponse(

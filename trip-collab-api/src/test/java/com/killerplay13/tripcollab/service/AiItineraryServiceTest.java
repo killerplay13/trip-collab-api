@@ -12,8 +12,10 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.killerplay13.tripcollab.config.TripCollabAiProperties;
+import com.killerplay13.tripcollab.domain.ItineraryItem;
 import com.killerplay13.tripcollab.domain.Trip;
 import com.killerplay13.tripcollab.domain.TripMemberEntity;
+import com.killerplay13.tripcollab.repo.ItineraryItemRepository;
 import com.killerplay13.tripcollab.repo.TripMemberRepository;
 import com.killerplay13.tripcollab.repo.TripRepository;
 import com.killerplay13.tripcollab.web.dto.ai.AiItineraryGenerateRequest;
@@ -43,6 +45,9 @@ class AiItineraryServiceTest {
   @Mock
   TripMemberRepository tripMemberRepository;
 
+  @Mock
+  ItineraryItemRepository itineraryItemRepository;
+
   @Test
   void generateMapsValidFastApiResponseIntoGroupedDays() {
     UUID tripId = UUID.randomUUID();
@@ -50,6 +55,10 @@ class AiItineraryServiceTest {
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
     when(tripMemberRepository.findByTripIdAndIsActiveTrueOrderByJoinedAtAsc(tripId))
         .thenReturn(List.of(new TripMemberEntity(), new TripMemberEntity()));
+    when(itineraryItemRepository.findAllByTrip(tripId)).thenReturn(List.of(
+        itineraryItem(tripId, LocalDate.of(2026, 5, 1), "Tottori Sand Dunes", "Tottori Sand Dunes", "Already planned."),
+        itineraryItem(tripId, LocalDate.of(2026, 5, 2), "  ", "Blank title place", "Should be excluded")
+    ));
 
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -66,6 +75,12 @@ class AiItineraryServiceTest {
         .andExpect(jsonPath("$.travel_style").value("food"))
         .andExpect(jsonPath("$.budget_level").value("medium"))
         .andExpect(jsonPath("$.language").value("zh-TW"))
+        .andExpect(jsonPath("$.avoid_duplicate_places").value(true))
+        .andExpect(jsonPath("$.existing_itinerary.length()").value(1))
+        .andExpect(jsonPath("$.existing_itinerary[0].day_date").value("2026-05-01"))
+        .andExpect(jsonPath("$.existing_itinerary[0].title").value("Tottori Sand Dunes"))
+        .andExpect(jsonPath("$.existing_itinerary[0].location_name").value("Tottori Sand Dunes"))
+        .andExpect(jsonPath("$.existing_itinerary[0].note").value("Already planned."))
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andRespond(withSuccess("""
             {
@@ -135,6 +150,7 @@ class AiItineraryServiceTest {
     UUID tripId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId)));
     when(tripMemberRepository.findByTripIdAndIsActiveTrueOrderByJoinedAtAsc(tripId)).thenReturn(List.of());
+    when(itineraryItemRepository.findAllByTrip(tripId)).thenReturn(List.of());
 
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -178,6 +194,52 @@ class AiItineraryServiceTest {
   }
 
   @Test
+  void generateSendsEmptyExistingItineraryWhenTripHasNoItems() {
+    UUID tripId = UUID.randomUUID();
+    when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId)));
+    when(tripMemberRepository.findByTripIdAndIsActiveTrueOrderByJoinedAtAsc(tripId)).thenReturn(List.of());
+    when(itineraryItemRepository.findAllByTrip(tripId)).thenReturn(List.of());
+
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    AiItineraryService service = service(restClient(builder));
+
+    server.expect(requestTo("http://ai.test/ai/itinerary/generate"))
+        .andExpect(jsonPath("$.avoid_duplicate_places").value(true))
+        .andExpect(jsonPath("$.existing_itinerary.length()").value(0))
+        .andRespond(withSuccess("""
+            {
+              "success": true,
+              "data": {
+                "items": [
+                  {
+                    "day_date": "2026-05-01",
+                    "title": "Draft item",
+                    "start_time": null,
+                    "end_time": null,
+                    "location_name": null,
+                    "map_url": null,
+                    "note": null,
+                    "sort_order": 1
+                  }
+                ],
+                "explanation": "Draft.",
+                "warnings": [],
+                "source": "mock",
+                "fallback": false,
+                "fallback_reason": null
+              },
+              "error": null
+            }
+            """, MediaType.APPLICATION_JSON));
+
+    var response = service.generate(tripId, defaultRequest());
+
+    assertThat(response.days()).hasSize(1);
+    server.verify();
+  }
+
+  @Test
   void generateReturns503WhenAiIsDisabled() {
     UUID tripId = UUID.randomUUID();
     TripCollabAiProperties properties = properties(false);
@@ -185,6 +247,7 @@ class AiItineraryServiceTest {
         properties,
         tripRepository,
         tripMemberRepository,
+        itineraryItemRepository,
         restClient(RestClient.builder())
     );
 
@@ -201,6 +264,7 @@ class AiItineraryServiceTest {
     UUID tripId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId)));
     when(tripMemberRepository.findByTripIdAndIsActiveTrueOrderByJoinedAtAsc(tripId)).thenReturn(List.of());
+    when(itineraryItemRepository.findAllByTrip(tripId)).thenReturn(List.of());
 
     ClientHttpRequestFactory timeoutFactory = (uri, httpMethod) -> {
       throw new SocketTimeoutException("timed out");
@@ -221,6 +285,7 @@ class AiItineraryServiceTest {
     UUID tripId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId)));
     when(tripMemberRepository.findByTripIdAndIsActiveTrueOrderByJoinedAtAsc(tripId)).thenReturn(List.of());
+    when(itineraryItemRepository.findAllByTrip(tripId)).thenReturn(List.of());
 
     ClientHttpRequestFactory connectionErrorFactory = (uri, httpMethod) -> {
       throw new ConnectException("connection refused");
@@ -237,7 +302,7 @@ class AiItineraryServiceTest {
   }
 
   private AiItineraryService service(RestClient restClient) {
-    return new AiItineraryService(properties(true), tripRepository, tripMemberRepository, restClient);
+    return new AiItineraryService(properties(true), tripRepository, tripMemberRepository, itineraryItemRepository, restClient);
   }
 
   private RestClient restClient(RestClient.Builder builder) {
@@ -260,6 +325,17 @@ class AiItineraryServiceTest {
     trip.setEndDate(LocalDate.of(2026, 5, 5));
     trip.setTimezone("Asia/Taipei");
     return trip;
+  }
+
+  private ItineraryItem itineraryItem(UUID tripId, LocalDate dayDate, String title, String locationName, String note) {
+    ItineraryItem item = new ItineraryItem();
+    item.setTripId(tripId);
+    item.setDayDate(dayDate);
+    item.setTitle(title);
+    item.setLocationName(locationName);
+    item.setNote(note);
+    item.setSortOrder(1);
+    return item;
   }
 
   private AiItineraryGenerateRequest defaultRequest() {
