@@ -12,6 +12,7 @@ import com.killerplay13.tripcollab.web.dto.ai.AiItineraryDraftDay;
 import com.killerplay13.tripcollab.web.dto.ai.AiItineraryDraftItem;
 import com.killerplay13.tripcollab.web.dto.ai.AiItineraryGenerateRequest;
 import com.killerplay13.tripcollab.web.dto.ai.AiItineraryGenerateResponse;
+import com.killerplay13.tripcollab.web.dto.ai.AiItineraryQualityChecks;
 import java.net.SocketTimeoutException;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -80,7 +81,28 @@ public class AiItineraryService {
         data.fallbackReason(),
         data.explanation(),
         data.warnings() == null ? List.of() : data.warnings(),
+        qualityChecks(data),
         groupDays(data.items())
+    );
+  }
+
+  private AiItineraryQualityChecks qualityChecks(FastApiItineraryGenerateData data) {
+    FastApiItineraryQualityChecks checks = data.qualityChecks();
+    if (checks == null) {
+      return new AiItineraryQualityChecks(
+          false,
+          false,
+          false,
+          false,
+          data.fallback()
+      );
+    }
+    return new AiItineraryQualityChecks(
+        checks.hasOutOfScopePlace(),
+        checks.hasUnrealisticTransport(),
+        checks.hasTimeConflict(),
+        checks.hasDuplicatePlace(),
+        checks.needsUserReview() || data.fallback()
     );
   }
 
@@ -276,7 +298,16 @@ public class AiItineraryService {
       List<String> warnings,
       String source,
       boolean fallback,
-      @JsonProperty("fallback_reason") String fallbackReason
+      @JsonProperty("fallback_reason") String fallbackReason,
+      @JsonProperty("quality_checks") FastApiItineraryQualityChecks qualityChecks
+  ) {}
+
+  private record FastApiItineraryQualityChecks(
+      @JsonProperty("has_out_of_scope_place") boolean hasOutOfScopePlace,
+      @JsonProperty("has_unrealistic_transport") boolean hasUnrealisticTransport,
+      @JsonProperty("has_time_conflict") boolean hasTimeConflict,
+      @JsonProperty("has_duplicate_place") boolean hasDuplicatePlace,
+      @JsonProperty("needs_user_review") boolean needsUserReview
   ) {}
 
   private record FastApiItineraryDraftItem(

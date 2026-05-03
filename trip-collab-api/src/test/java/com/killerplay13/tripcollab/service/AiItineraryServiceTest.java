@@ -112,7 +112,14 @@ class AiItineraryServiceTest {
                 "warnings": ["Check opening hours."],
                 "source": "mock",
                 "fallback": false,
-                "fallback_reason": null
+                "fallback_reason": null,
+                "quality_checks": {
+                  "has_out_of_scope_place": true,
+                  "has_unrealistic_transport": false,
+                  "has_time_conflict": true,
+                  "has_duplicate_place": false,
+                  "needs_user_review": true
+                }
               },
               "error": null
             }
@@ -137,6 +144,11 @@ class AiItineraryServiceTest {
     assertThat(response.fallbackReason()).isNull();
     assertThat(response.explanation()).isEqualTo("Food-first route.");
     assertThat(response.warnings()).containsExactly("Check opening hours.");
+    assertThat(response.qualityChecks().hasOutOfScopePlace()).isTrue();
+    assertThat(response.qualityChecks().hasUnrealisticTransport()).isFalse();
+    assertThat(response.qualityChecks().hasTimeConflict()).isTrue();
+    assertThat(response.qualityChecks().hasDuplicatePlace()).isFalse();
+    assertThat(response.qualityChecks().needsUserReview()).isTrue();
     assertThat(response.days()).hasSize(2);
     assertThat(response.days().get(0).dayDate()).isEqualTo(LocalDate.of(2026, 5, 2));
     assertThat(response.days().get(0).items().get(0).title()).isEqualTo("Arrival food walk");
@@ -188,6 +200,7 @@ class AiItineraryServiceTest {
     assertThat(response.fallback()).isTrue();
     assertThat(response.fallbackReason()).isEqualTo("timeout");
     assertThat(response.warnings()).containsExactly("AI provider failed or timed out.");
+    assertThat(response.qualityChecks().needsUserReview()).isTrue();
     assertThat(response.days()).hasSize(1);
 
     server.verify();
@@ -235,6 +248,11 @@ class AiItineraryServiceTest {
 
     var response = service.generate(tripId, defaultRequest());
 
+    assertThat(response.qualityChecks().hasOutOfScopePlace()).isFalse();
+    assertThat(response.qualityChecks().hasUnrealisticTransport()).isFalse();
+    assertThat(response.qualityChecks().hasTimeConflict()).isFalse();
+    assertThat(response.qualityChecks().hasDuplicatePlace()).isFalse();
+    assertThat(response.qualityChecks().needsUserReview()).isFalse();
     assertThat(response.days()).hasSize(1);
     server.verify();
   }

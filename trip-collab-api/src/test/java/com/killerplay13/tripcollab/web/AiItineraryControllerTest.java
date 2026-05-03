@@ -14,6 +14,7 @@ import com.killerplay13.tripcollab.web.dto.ai.AiItineraryDraftDay;
 import com.killerplay13.tripcollab.web.dto.ai.AiItineraryDraftItem;
 import com.killerplay13.tripcollab.web.dto.ai.AiItineraryGenerateRequest;
 import com.killerplay13.tripcollab.web.dto.ai.AiItineraryGenerateResponse;
+import com.killerplay13.tripcollab.web.dto.ai.AiItineraryQualityChecks;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
@@ -41,6 +42,7 @@ class AiItineraryControllerTest {
             null,
             "Generated draft.",
             List.of(),
+            new AiItineraryQualityChecks(false, false, false, false, false),
             List.of(new AiItineraryDraftDay(
                 LocalDate.of(2026, 5, 1),
                 List.of(new AiItineraryDraftItem(

@@ -9,5 +9,6 @@ public record AiItineraryGenerateResponse(
     String fallbackReason,
     String explanation,
     List<String> warnings,
+    AiItineraryQualityChecks qualityChecks,
     List<AiItineraryDraftDay> days
 ) {}
