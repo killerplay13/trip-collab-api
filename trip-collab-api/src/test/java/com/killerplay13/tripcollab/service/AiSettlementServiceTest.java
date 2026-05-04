@@ -48,16 +48,16 @@ class AiSettlementServiceTest {
     UUID bobId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId, "USD")));
     when(expenseService.summary(tripId)).thenReturn(List.of(
-        memberSummary(aliceId, "Alice", "-150.00", "TWD"),
-        memberSummary(bobId, "Bob", "150.00", "TWD")
+        memberSummary(aliceId, "Alice", "600.00", "300.00", "300.00", "TWD"),
+        memberSummary(bobId, "Bob", "0.00", "300.00", "-300.00", "TWD")
     ));
     when(expenseService.settlements(tripId)).thenReturn(List.of(
         new ExpenseService.SettlementTransfer(
-            aliceId,
-            "Alice",
             bobId,
             "Bob",
-            new BigDecimal("150.00"),
+            aliceId,
+            "Alice",
+            new BigDecimal("300.00"),
             "TWD"
         )
     ));
@@ -71,15 +71,24 @@ class AiSettlementServiceTest {
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.trip_id").value(tripId.toString()))
         .andExpect(jsonPath("$.currency").value("TWD"))
+        .andExpect(jsonPath("$.language").value("zh-TW"))
+        .andExpect(jsonPath("$.total_expense").value(600.0))
+        .andExpect(jsonPath("$.member_count").value(2))
+        .andExpect(jsonPath("$.transaction_count").value(1))
         .andExpect(jsonPath("$.members.length()").value(2))
         .andExpect(jsonPath("$.members[0].member_id").value(aliceId.toString()))
         .andExpect(jsonPath("$.members[0].name").value("Alice"))
         .andExpect(jsonPath("$.balances[0].member_id").value(aliceId.toString()))
-        .andExpect(jsonPath("$.balances[0].net_balance").value(-150.0))
+        .andExpect(jsonPath("$.balances[0].net_balance").value(300.0))
         .andExpect(jsonPath("$.transactions.length()").value(1))
-        .andExpect(jsonPath("$.transactions[0].from").value(aliceId.toString()))
-        .andExpect(jsonPath("$.transactions[0].to").value(bobId.toString()))
-        .andExpect(jsonPath("$.transactions[0].amount").value(150.0))
+        .andExpect(jsonPath("$.transactions[0].from").value(bobId.toString()))
+        .andExpect(jsonPath("$.transactions[0].to").value(aliceId.toString()))
+        .andExpect(jsonPath("$.transactions[0].amount").value(300.0))
+        .andExpect(jsonPath("$.member_summaries[0].member_id").value(aliceId.toString()))
+        .andExpect(jsonPath("$.member_summaries[0].name").value("Alice"))
+        .andExpect(jsonPath("$.member_summaries[0].paid_total").value(600.0))
+        .andExpect(jsonPath("$.member_summaries[0].owed_total").value(300.0))
+        .andExpect(jsonPath("$.member_summaries[0].net_balance").value(300.0))
         .andRespond(withSuccess("""
             {
               "success": true,
@@ -92,7 +101,7 @@ class AiSettlementServiceTest {
             }
             """, MediaType.APPLICATION_JSON));
 
-    var response = service.explain(tripId);
+    var response = service.explain(tripId, "zh-TW");
 
     assertThat(response.tripId()).isEqualTo(tripId);
     assertThat(response.currency()).isEqualTo("TWD");
@@ -113,7 +122,7 @@ class AiSettlementServiceTest {
         tripRepository
     );
 
-    assertThatThrownBy(() -> service.explain(tripId))
+    assertThatThrownBy(() -> service.explain(tripId, "en"))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode().value())
         .isEqualTo(503);
@@ -127,7 +136,7 @@ class AiSettlementServiceTest {
     UUID tripId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.empty());
 
-    assertThatThrownBy(() -> service(restClient(RestClient.builder())).explain(tripId))
+    assertThatThrownBy(() -> service(restClient(RestClient.builder())).explain(tripId, "en"))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode().value())
         .isEqualTo(404);
@@ -141,7 +150,9 @@ class AiSettlementServiceTest {
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId, "JPY")));
     when(expenseService.summary(tripId)).thenReturn(List.of());
 
-    var response = service(restClient(RestClient.builder())).explain(tripId);
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    var response = service(restClient(builder)).explain(tripId, "en");
 
     assertThat(response.tripId()).isEqualTo(tripId);
     assertThat(response.currency()).isEqualTo("JPY");
@@ -149,6 +160,55 @@ class AiSettlementServiceTest {
     assertThat(response.steps()).containsExactly("There are no expenses to explain.");
     assertThat(response.tips()).containsExactly("Add trip expenses first to generate a settlement explanation.");
     verify(expenseService, never()).settlements(tripId);
+    server.verify();
+  }
+
+  @Test
+  void explainReturnsChineseDefaultWhenSummaryIsEmpty() {
+    UUID tripId = UUID.randomUUID();
+    when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId, "TWD")));
+    when(expenseService.summary(tripId)).thenReturn(List.of());
+
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    var response = service(restClient(builder)).explain(tripId, "zh-TW");
+
+    assertThat(response.tripId()).isEqualTo(tripId);
+    assertThat(response.currency()).isEqualTo("TWD");
+    assertThat(response.summary()).isEqualTo("這次旅程目前尚無需結算的費用。");
+    assertThat(response.steps()).containsExactly("目前尚無費用記錄。");
+    assertThat(response.tips()).containsExactly("請先新增旅程費用，再產生結算說明。");
+    verify(expenseService, never()).settlements(tripId);
+    server.verify();
+  }
+
+  @Test
+  void explainNormalizesBlankLanguageToDefault() {
+    UUID tripId = UUID.randomUUID();
+    stubSettlementInputs(tripId);
+
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    AiSettlementService service = service(restClient(builder));
+
+    server.expect(requestTo("http://ai.test/ai/settlement/explain"))
+        .andExpect(jsonPath("$.language").value("zh-TW"))
+        .andRespond(withSuccess("""
+            {
+              "success": true,
+              "data": {
+                "summary": "ok",
+                "steps": [],
+                "tips": []
+              },
+              "error": null
+            }
+            """, MediaType.APPLICATION_JSON));
+
+    var response = service.explain(tripId, "  ");
+
+    assertThat(response.summary()).isEqualTo("ok");
+    server.verify();
   }
 
   @Test
@@ -158,8 +218,8 @@ class AiSettlementServiceTest {
     UUID bobId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId, "TWD")));
     when(expenseService.summary(tripId)).thenReturn(List.of(
-        memberSummary(aliceId, "Alice", "-150.00", "TWD"),
-        memberSummary(bobId, "Bob", "150.00", "TWD")
+        memberSummary(aliceId, "Alice", "0.00", "150.00", "-150.00", "TWD"),
+        memberSummary(bobId, "Bob", "150.00", "0.00", "150.00", "TWD")
     ));
     when(expenseService.settlements(tripId)).thenReturn(List.of(
         new ExpenseService.SettlementTransfer(aliceId, "Alice", bobId, "Bob", new BigDecimal("150.00"), "TWD")
@@ -173,7 +233,7 @@ class AiSettlementServiceTest {
         .requestFactory(timeoutFactory)
         .build());
 
-    assertThatThrownBy(() -> service.explain(tripId))
+    assertThatThrownBy(() -> service.explain(tripId, "en"))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode().value())
         .isEqualTo(504);
@@ -186,8 +246,8 @@ class AiSettlementServiceTest {
     UUID bobId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId, "TWD")));
     when(expenseService.summary(tripId)).thenReturn(List.of(
-        memberSummary(aliceId, "Alice", "-150.00", "TWD"),
-        memberSummary(bobId, "Bob", "150.00", "TWD")
+        memberSummary(aliceId, "Alice", "0.00", "150.00", "-150.00", "TWD"),
+        memberSummary(bobId, "Bob", "150.00", "0.00", "150.00", "TWD")
     ));
     when(expenseService.settlements(tripId)).thenReturn(List.of(
         new ExpenseService.SettlementTransfer(aliceId, "Alice", bobId, "Bob", new BigDecimal("150.00"), "TWD")
@@ -201,7 +261,7 @@ class AiSettlementServiceTest {
         .requestFactory(connectionErrorFactory)
         .build());
 
-    assertThatThrownBy(() -> service.explain(tripId))
+    assertThatThrownBy(() -> service.explain(tripId, "en"))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode().value())
         .isEqualTo(502);
@@ -219,7 +279,7 @@ class AiSettlementServiceTest {
     server.expect(requestTo("http://ai.test/ai/settlement/explain"))
         .andRespond(withServerError());
 
-    assertThatThrownBy(() -> service.explain(tripId))
+    assertThatThrownBy(() -> service.explain(tripId, "en"))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode().value())
         .isEqualTo(502);
@@ -245,7 +305,7 @@ class AiSettlementServiceTest {
             }
             """, MediaType.APPLICATION_JSON));
 
-    assertThatThrownBy(() -> service.explain(tripId))
+    assertThatThrownBy(() -> service.explain(tripId, "en"))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode().value())
         .isEqualTo(502);
@@ -258,8 +318,8 @@ class AiSettlementServiceTest {
     UUID bobId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId, "TWD")));
     when(expenseService.summary(tripId)).thenReturn(List.of(
-        memberSummary(aliceId, "Alice", "-150.00", "TWD"),
-        memberSummary(bobId, "Bob", "150.00", "TWD")
+        memberSummary(aliceId, "Alice", "0.00", "150.00", "-150.00", "TWD"),
+        memberSummary(bobId, "Bob", "150.00", "0.00", "150.00", "TWD")
     ));
     when(expenseService.settlements(tripId)).thenReturn(List.of(
         new ExpenseService.SettlementTransfer(aliceId, "Alice", bobId, "Bob", new BigDecimal("150.00"), "TWD")
@@ -293,16 +353,17 @@ class AiSettlementServiceTest {
   private ExpenseService.MemberSummary memberSummary(
       UUID memberId,
       String nickname,
+      String paidTotal,
+      String owedTotal,
       String net,
       String currency
   ) {
-    BigDecimal netAmount = new BigDecimal(net);
     return new ExpenseService.MemberSummary(
         memberId,
         nickname,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        netAmount,
+        new BigDecimal(paidTotal),
+        new BigDecimal(owedTotal),
+        new BigDecimal(net),
         currency
     );
   }

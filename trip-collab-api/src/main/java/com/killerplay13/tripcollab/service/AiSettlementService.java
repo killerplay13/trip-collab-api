@@ -22,6 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class AiSettlementService {
   private static final String DEFAULT_CURRENCY = "TWD";
+  private static final String DEFAULT_LANGUAGE = "zh-TW";
 
   private final RestClient restClient;
   private final TripCollabAiProperties properties;
@@ -41,7 +42,9 @@ public class AiSettlementService {
   }
 
   @Transactional(readOnly = true)
-  public AiSettlementExplainResponse explain(UUID tripId) {
+  public AiSettlementExplainResponse explain(UUID tripId, String language) {
+    String effectiveLanguage = normalizeLanguage(language);
+
     if (!properties.isEnabled()) {
       throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "AI settlement explanation is disabled");
     }
@@ -53,17 +56,17 @@ public class AiSettlementService {
     String currency = resolveCurrency(trip, summaries);
 
     if (summaries.isEmpty()) {
-      return new AiSettlementExplainResponse(
-          tripId,
-          currency,
-          "No settlement is needed for this trip yet.",
-          List.of("There are no expenses to explain."),
-          List.of("Add trip expenses first to generate a settlement explanation.")
-      );
+      return emptySettlementResponse(tripId, currency, effectiveLanguage);
     }
 
     List<ExpenseService.SettlementTransfer> settlements = expenseService.settlements(tripId);
-    FastApiSettlementExplainRequest fastApiRequest = toFastApiRequest(tripId, currency, summaries, settlements);
+    FastApiSettlementExplainRequest fastApiRequest = toFastApiRequest(
+        tripId,
+        currency,
+        effectiveLanguage,
+        summaries,
+        settlements
+    );
     FastApiSettlementApiResponse fastApiResponse = callFastApi(fastApiRequest);
     FastApiSettlementData data = validateResponse(fastApiResponse);
 
@@ -79,31 +82,54 @@ public class AiSettlementService {
   private FastApiSettlementExplainRequest toFastApiRequest(
       UUID tripId,
       String currency,
+      String language,
       List<ExpenseService.MemberSummary> summaries,
       List<ExpenseService.SettlementTransfer> settlements
   ) {
+    List<FastApiSettlementMember> members = summaries.stream()
+        .map(summary -> new FastApiSettlementMember(
+            summary.memberId().toString(),
+            summary.nickname()
+        ))
+        .toList();
+    List<FastApiSettlementBalance> balances = summaries.stream()
+        .map(summary -> new FastApiSettlementBalance(
+            summary.memberId().toString(),
+            summary.net().doubleValue()
+        ))
+        .toList();
+    List<FastApiSettlementTransaction> transactions = settlements.stream()
+        .map(transfer -> new FastApiSettlementTransaction(
+            transfer.fromMemberId().toString(),
+            transfer.toMemberId().toString(),
+            transfer.amount().doubleValue()
+        ))
+        .toList();
+    List<FastApiSettlementMemberSummary> memberSummaries = summaries.stream()
+        .map(summary -> new FastApiSettlementMemberSummary(
+            summary.memberId().toString(),
+            summary.nickname(),
+            summary.paidTotal().doubleValue(),
+            summary.owedTotal().doubleValue(),
+            summary.net().doubleValue()
+        ))
+        .toList();
+    double totalExpense = summaries.stream()
+        .map(ExpenseService.MemberSummary::paidTotal)
+        .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add)
+        .doubleValue();
+
     return new FastApiSettlementExplainRequest(
         tripId.toString(),
         currency,
-        summaries.stream()
-            .map(summary -> new FastApiSettlementMember(
-                summary.memberId().toString(),
-                summary.nickname()
-            ))
-            .toList(),
-        summaries.stream()
-            .map(summary -> new FastApiSettlementBalance(
-                summary.memberId().toString(),
-                summary.net().doubleValue()
-            ))
-            .toList(),
-        settlements.stream()
-            .map(transfer -> new FastApiSettlementTransaction(
-                transfer.fromMemberId().toString(),
-                transfer.toMemberId().toString(),
-                transfer.amount().doubleValue()
-            ))
-            .toList()
+        language,
+        totalExpense,
+        summaries.size(),
+        settlements.size(),
+        members,
+        balances,
+        transactions,
+        memberSummaries
     );
   }
 
@@ -150,6 +176,32 @@ public class AiSettlementService {
     return DEFAULT_CURRENCY;
   }
 
+  private String normalizeLanguage(String language) {
+    return language == null || language.isBlank() ? DEFAULT_LANGUAGE : language.trim();
+  }
+
+  private AiSettlementExplainResponse emptySettlementResponse(UUID tripId, String currency, String language) {
+    boolean isZh = language != null && language.startsWith("zh");
+
+    if (isZh) {
+      return new AiSettlementExplainResponse(
+          tripId,
+          currency,
+          "這次旅程目前尚無需結算的費用。",
+          List.of("目前尚無費用記錄。"),
+          List.of("請先新增旅程費用，再產生結算說明。")
+      );
+    }
+
+    return new AiSettlementExplainResponse(
+        tripId,
+        currency,
+        "No settlement is needed for this trip yet.",
+        List.of("There are no expenses to explain."),
+        List.of("Add trip expenses first to generate a settlement explanation.")
+    );
+  }
+
   private static String blankToNull(String value) {
     if (value == null) {
       return null;
@@ -173,9 +225,14 @@ public class AiSettlementService {
   private record FastApiSettlementExplainRequest(
       @JsonProperty("trip_id") String tripId,
       String currency,
+      String language,
+      @JsonProperty("total_expense") Double totalExpense,
+      @JsonProperty("member_count") Integer memberCount,
+      @JsonProperty("transaction_count") Integer transactionCount,
       List<FastApiSettlementMember> members,
       List<FastApiSettlementBalance> balances,
-      List<FastApiSettlementTransaction> transactions
+      List<FastApiSettlementTransaction> transactions,
+      @JsonProperty("member_summaries") List<FastApiSettlementMemberSummary> memberSummaries
   ) {}
 
   private record FastApiSettlementMember(
@@ -192,6 +249,14 @@ public class AiSettlementService {
       @JsonProperty("from") String from,
       String to,
       double amount
+  ) {}
+
+  private record FastApiSettlementMemberSummary(
+      @JsonProperty("member_id") String memberId,
+      String name,
+      @JsonProperty("paid_total") double paidTotal,
+      @JsonProperty("owed_total") double owedTotal,
+      @JsonProperty("net_balance") double netBalance
   ) {}
 
   private record FastApiSettlementApiResponse(

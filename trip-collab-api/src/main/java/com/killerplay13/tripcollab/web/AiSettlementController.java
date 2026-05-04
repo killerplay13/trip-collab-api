@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -19,7 +20,10 @@ public class AiSettlementController {
   }
 
   @PostMapping("/ai/explain")
-  public ResponseEntity<AiSettlementExplainResponse> explain(@PathVariable UUID tripId) {
-    return ResponseEntity.ok(service.explain(tripId));
+  public ResponseEntity<AiSettlementExplainResponse> explain(
+      @PathVariable UUID tripId,
+      @RequestParam(defaultValue = "zh-TW") String language
+  ) {
+    return ResponseEntity.ok(service.explain(tripId, language));
   }
 }
