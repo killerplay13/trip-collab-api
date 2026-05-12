@@ -2,13 +2,23 @@ package com.killerplay13.tripcollab.service;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.killerplay13.tripcollab.config.TripCollabAiProperties;
+import com.killerplay13.tripcollab.domain.ExpenseEntity;
+import com.killerplay13.tripcollab.domain.Trip;
 import com.killerplay13.tripcollab.repo.TripRepository;
 import com.killerplay13.tripcollab.web.dto.ai.AiExpenseInsightRequest;
 import com.killerplay13.tripcollab.web.dto.ai.AiExpenseInsightResponse;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.SocketTimeoutException;
+import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.TreeMap;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -26,23 +36,28 @@ public class AiExpenseInsightService {
   private final RestClient restClient;
   private final TripCollabAiProperties properties;
   private final TripRepository tripRepository;
+  private final ExpenseService expenseService;
 
   public AiExpenseInsightService(
       @Qualifier("tripCollabAiRestClient") RestClient restClient,
       TripCollabAiProperties properties,
-      TripRepository tripRepository
+      TripRepository tripRepository,
+      ExpenseService expenseService
   ) {
     this.restClient = restClient;
     this.properties = properties;
     this.tripRepository = tripRepository;
+    this.expenseService = expenseService;
   }
 
   @Transactional(readOnly = true)
   public AiExpenseInsightResponse insight(UUID tripId, AiExpenseInsightRequest request) {
-    tripRepository.findById(tripId)
+    Trip trip = tripRepository.findById(tripId)
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trip not found"));
 
     String language = normalizeLanguage(request == null ? null : request.language());
+    List<ExpenseEntity> expenses = expenseService.listAll(tripId);
+    List<ExpenseService.MemberSummary> memberSummaries = expenseService.summary(tripId);
 
     if (!properties.isEnabled()) {
       return fallback(language, "disabled");
@@ -51,6 +66,13 @@ public class AiExpenseInsightService {
     FastApiExpenseInsightRequest fastApiRequest = new FastApiExpenseInsightRequest(
         tripId.toString(),
         language,
+        resolveCurrency(trip, memberSummaries),
+        totalAmount(expenses),
+        expenses.size(),
+        memberSummaries.size(),
+        dailyTotals(expenses),
+        topExpenses(expenses),
+        memberBalances(memberSummaries),
         request == null ? null : request.budgetAmount(),
         request == null ? null : request.remainingDays()
     );
@@ -101,20 +123,20 @@ public class AiExpenseInsightService {
   private AiExpenseInsightResponse fallback(String language, String reason) {
     if (language != null && language.startsWith("zh")) {
       return new AiExpenseInsightResponse(
-          "AI 花費分析暫時無法使用，目前顯示安全 fallback 摘要。",
-          List.of("AI 花費分析入口已透過 Spring Boot 建立。"),
-          List.of("這是 fallback 結果，因為 AI service 未完成請求。"),
-          List.of("請稍後再試，或先使用既有支出列表與分帳功能。"),
+          "AI 花費分析暫時無法使用，請稍後再試。",
+          List.of(),
+          List.of("AI 花費分析暫時無法使用，請稍後再試。"),
+          List.of(),
           true,
           reason
       );
     }
 
     return new AiExpenseInsightResponse(
-        "AI expense insight is temporarily unavailable. Showing a safe fallback summary.",
-        List.of("Expense insight flow is available through Spring Boot."),
-        List.of("This fallback was generated because the AI service could not complete the request."),
-        List.of("Please try again later, or continue using the existing expense and settlement views."),
+        "AI expense insight is temporarily unavailable. Please try again later.",
+        List.of(),
+        List.of("AI expense insight is temporarily unavailable. Please try again later."),
+        List.of(),
         true,
         reason
     );
@@ -122,6 +144,68 @@ public class AiExpenseInsightService {
 
   private String normalizeLanguage(String language) {
     return language == null || language.isBlank() ? DEFAULT_LANGUAGE : language.trim();
+  }
+
+  private String resolveCurrency(Trip trip, List<ExpenseService.MemberSummary> memberSummaries) {
+    if (trip.getCurrency() != null && !trip.getCurrency().isBlank()) {
+      return trip.getCurrency().trim().toUpperCase(Locale.ROOT);
+    }
+    return memberSummaries.stream()
+        .map(ExpenseService.MemberSummary::currency)
+        .filter(currency -> currency != null && !currency.isBlank())
+        .findFirst()
+        .map(currency -> currency.trim().toUpperCase(Locale.ROOT))
+        .orElse("TWD");
+  }
+
+  private BigDecimal totalAmount(List<ExpenseEntity> expenses) {
+    return expenses.stream()
+        .map(ExpenseEntity::getAmount)
+        .filter(Objects::nonNull)
+        .reduce(BigDecimal.ZERO, BigDecimal::add)
+        .setScale(2, RoundingMode.HALF_UP);
+  }
+
+  private List<FastApiDailyTotal> dailyTotals(List<ExpenseEntity> expenses) {
+    Map<LocalDate, BigDecimal> totals = expenses.stream()
+        .filter(expense -> expense.getExpenseDate() != null)
+        .collect(Collectors.groupingBy(
+            ExpenseEntity::getExpenseDate,
+            TreeMap::new,
+            Collectors.mapping(
+                expense -> expense.getAmount() == null ? BigDecimal.ZERO : expense.getAmount(),
+                Collectors.reducing(BigDecimal.ZERO, BigDecimal::add)
+            )
+        ));
+
+    return totals.entrySet().stream()
+        .map(entry -> new FastApiDailyTotal(entry.getKey().toString(), entry.getValue().setScale(2, RoundingMode.HALF_UP)))
+        .toList();
+  }
+
+  private List<FastApiTopExpense> topExpenses(List<ExpenseEntity> expenses) {
+    return expenses.stream()
+        .sorted(Comparator
+            .comparing((ExpenseEntity expense) -> expense.getAmount() == null ? BigDecimal.ZERO : expense.getAmount())
+            .reversed())
+        .limit(5)
+        .map(expense -> new FastApiTopExpense(
+            expense.getTitle(),
+            (expense.getAmount() == null ? BigDecimal.ZERO : expense.getAmount()).setScale(2, RoundingMode.HALF_UP),
+            expense.getExpenseDate() == null ? null : expense.getExpenseDate().toString()
+        ))
+        .toList();
+  }
+
+  private List<FastApiMemberBalance> memberBalances(List<ExpenseService.MemberSummary> summaries) {
+    return summaries.stream()
+        .map(summary -> new FastApiMemberBalance(
+            summary.nickname(),
+            summary.paidTotal().setScale(2, RoundingMode.HALF_UP),
+            summary.owedTotal().setScale(2, RoundingMode.HALF_UP),
+            summary.net().setScale(2, RoundingMode.HALF_UP)
+        ))
+        .toList();
   }
 
   private static boolean isTimeout(Throwable throwable) {
@@ -139,8 +223,33 @@ public class AiExpenseInsightService {
   private record FastApiExpenseInsightRequest(
       @JsonProperty("trip_id") String tripId,
       String language,
-      @JsonProperty("budget_amount") BigDecimal budgetAmount,
-      @JsonProperty("remaining_days") Integer remainingDays
+      String currency,
+      @JsonProperty("totalAmount") BigDecimal totalAmount,
+      @JsonProperty("expenseCount") int expenseCount,
+      @JsonProperty("memberCount") int memberCount,
+      @JsonProperty("dailyTotals") List<FastApiDailyTotal> dailyTotals,
+      @JsonProperty("topExpenses") List<FastApiTopExpense> topExpenses,
+      @JsonProperty("memberBalances") List<FastApiMemberBalance> memberBalances,
+      @JsonProperty("budgetAmount") BigDecimal budgetAmount,
+      @JsonProperty("remainingDays") Integer remainingDays
+  ) {}
+
+  private record FastApiDailyTotal(
+      String date,
+      BigDecimal amount
+  ) {}
+
+  private record FastApiTopExpense(
+      String title,
+      BigDecimal amount,
+      String date
+  ) {}
+
+  private record FastApiMemberBalance(
+      @JsonProperty("memberName") String memberName,
+      @JsonProperty("paidAmount") BigDecimal paidAmount,
+      @JsonProperty("shareAmount") BigDecimal shareAmount,
+      BigDecimal balance
   ) {}
 
   private record FastApiExpenseInsightApiResponse(

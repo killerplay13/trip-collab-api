@@ -10,10 +10,13 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.killerplay13.tripcollab.config.TripCollabAiProperties;
+import com.killerplay13.tripcollab.domain.ExpenseEntity;
 import com.killerplay13.tripcollab.domain.Trip;
 import com.killerplay13.tripcollab.repo.TripRepository;
 import com.killerplay13.tripcollab.web.dto.ai.AiExpenseInsightRequest;
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -31,10 +34,24 @@ class AiExpenseInsightServiceTest {
   @Mock
   TripRepository tripRepository;
 
+  @Mock
+  ExpenseService expenseService;
+
   @Test
   void insightReturnsParsedResponseFromFastApi() {
     UUID tripId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId)));
+    UUID aliceId = UUID.randomUUID();
+    UUID bobId = UUID.randomUUID();
+    when(expenseService.listAll(tripId)).thenReturn(List.of(
+        expense("Hotel", "6000", LocalDate.of(2026, 5, 4)),
+        expense("Dinner", "1200", LocalDate.of(2026, 5, 4)),
+        expense("Train", "800", LocalDate.of(2026, 5, 5))
+    ));
+    when(expenseService.summary(tripId)).thenReturn(List.of(
+        memberSummary(aliceId, "Alice", "5000", "3200", "1800", "TWD"),
+        memberSummary(bobId, "Bob", "3000", "4800", "-1800", "TWD")
+    ));
 
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -45,8 +62,22 @@ class AiExpenseInsightServiceTest {
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.trip_id").value(tripId.toString()))
         .andExpect(jsonPath("$.language").value("zh-TW"))
-        .andExpect(jsonPath("$.budget_amount").value(20000))
-        .andExpect(jsonPath("$.remaining_days").value(2))
+        .andExpect(jsonPath("$.currency").value("TWD"))
+        .andExpect(jsonPath("$.totalAmount").value(8000.0))
+        .andExpect(jsonPath("$.expenseCount").value(3))
+        .andExpect(jsonPath("$.memberCount").value(2))
+        .andExpect(jsonPath("$.dailyTotals[0].date").value("2026-05-04"))
+        .andExpect(jsonPath("$.dailyTotals[0].amount").value(7200.0))
+        .andExpect(jsonPath("$.dailyTotals[1].date").value("2026-05-05"))
+        .andExpect(jsonPath("$.dailyTotals[1].amount").value(800.0))
+        .andExpect(jsonPath("$.topExpenses[0].title").value("Hotel"))
+        .andExpect(jsonPath("$.topExpenses[0].amount").value(6000.0))
+        .andExpect(jsonPath("$.memberBalances[0].memberName").value("Alice"))
+        .andExpect(jsonPath("$.memberBalances[0].paidAmount").value(5000.0))
+        .andExpect(jsonPath("$.memberBalances[0].shareAmount").value(3200.0))
+        .andExpect(jsonPath("$.memberBalances[0].balance").value(1800.0))
+        .andExpect(jsonPath("$.budgetAmount").value(20000))
+        .andExpect(jsonPath("$.remainingDays").value(2))
         .andRespond(withSuccess("""
             {
               "success": true,
@@ -81,6 +112,8 @@ class AiExpenseInsightServiceTest {
   void insightReturnsFallbackWhenAiIsDisabled() {
     UUID tripId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId)));
+    when(expenseService.listAll(tripId)).thenReturn(List.of());
+    when(expenseService.summary(tripId)).thenReturn(List.of());
 
     AiExpenseInsightService service = service(restClient(RestClient.builder()), false);
 
@@ -89,13 +122,16 @@ class AiExpenseInsightServiceTest {
     assertThat(response.fallback()).isTrue();
     assertThat(response.fallbackReason()).isEqualTo("disabled");
     assertThat(response.summary()).isNotBlank();
-    assertThat(response.highlights()).isNotEmpty();
+    assertThat(response.highlights()).isEmpty();
+    assertThat(response.warnings()).containsExactly("AI expense insight is temporarily unavailable. Please try again later.");
   }
 
   @Test
   void insightReturnsFallbackWhenFastApiFails() {
     UUID tripId = UUID.randomUUID();
     when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip(tripId)));
+    when(expenseService.listAll(tripId)).thenReturn(List.of());
+    when(expenseService.summary(tripId)).thenReturn(List.of());
 
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -108,12 +144,13 @@ class AiExpenseInsightServiceTest {
 
     assertThat(response.fallback()).isTrue();
     assertThat(response.fallbackReason()).isEqualTo("fastapi_error");
+    assertThat(response.warnings()).containsExactly("AI expense insight is temporarily unavailable. Please try again later.");
 
     server.verify();
   }
 
   private AiExpenseInsightService service(RestClient restClient, boolean enabled) {
-    return new AiExpenseInsightService(restClient, properties(enabled), tripRepository);
+    return new AiExpenseInsightService(restClient, properties(enabled), tripRepository, expenseService);
   }
 
   private RestClient restClient(RestClient.Builder builder) {
@@ -134,5 +171,32 @@ class AiExpenseInsightServiceTest {
     trip.setTitle("Hong Kong family trip");
     trip.setCurrency("TWD");
     return trip;
+  }
+
+  private ExpenseEntity expense(String title, String amount, LocalDate date) {
+    ExpenseEntity expense = new ExpenseEntity();
+    expense.setTitle(title);
+    expense.setAmount(new BigDecimal(amount));
+    expense.setExpenseDate(date);
+    expense.setCurrency("TWD");
+    return expense;
+  }
+
+  private ExpenseService.MemberSummary memberSummary(
+      UUID memberId,
+      String nickname,
+      String paidTotal,
+      String owedTotal,
+      String net,
+      String currency
+  ) {
+    return new ExpenseService.MemberSummary(
+        memberId,
+        nickname,
+        new BigDecimal(paidTotal),
+        new BigDecimal(owedTotal),
+        new BigDecimal(net),
+        currency
+    );
   }
 }
