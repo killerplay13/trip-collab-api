@@ -24,15 +24,15 @@ public class NoteController {
     private final TripMemberRepository tripMemberRepository;
 
     public record NoteResponse(
-            UUID id,
-            UUID tripId,
-            UUID authorId,
-            String title,
-            String content,
-            Instant createdAt,
-            Instant updatedAt,
-            UUID creatorMemberId,
-            String creatorNickname
+            @com.fasterxml.jackson.annotation.JsonProperty("id") UUID id,
+            @com.fasterxml.jackson.annotation.JsonProperty("tripId") UUID tripId,
+            @com.fasterxml.jackson.annotation.JsonProperty("authorId") UUID authorId,
+            @com.fasterxml.jackson.annotation.JsonProperty("title") String title,
+            @com.fasterxml.jackson.annotation.JsonProperty("content") String content,
+            @com.fasterxml.jackson.annotation.JsonProperty("createdAt") Instant createdAt,
+            @com.fasterxml.jackson.annotation.JsonProperty("updatedAt") Instant updatedAt,
+            @com.fasterxml.jackson.annotation.JsonProperty("creatorMemberId") UUID creatorMemberId,
+            @com.fasterxml.jackson.annotation.JsonProperty("creatorNickname") String creatorNickname
     ) {
         public static NoteResponse from(NoteEntity n, String creatorNickname) {
             return new NoteResponse(n.getId(), n.getTripId(), n.getAuthorId(), n.getTitle(), n.getContent(), n.getCreatedAt(), n.getUpdatedAt(), n.getAuthorId(), creatorNickname);

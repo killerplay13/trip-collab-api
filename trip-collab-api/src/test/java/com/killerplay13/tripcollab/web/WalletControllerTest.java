@@ -148,7 +148,7 @@ class WalletControllerTest {
     UUID memberId = UUID.randomUUID();
 
     when(walletQueryService.getSummary(tripId))
-        .thenReturn(new WalletSummaryResponse("TWD", List.of()));
+        .thenReturn(new WalletSummaryResponse(1L, tripId, "TWD", List.of(), null, java.time.Instant.now()));
 
     mvc.perform(get("/api/trips/{tripId}/wallet", tripId)
             .requestAttr(MemberTokenFilter.ATTR_MEMBER_ID, memberId)
