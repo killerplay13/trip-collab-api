@@ -13,10 +13,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.killerplay13.tripcollab.security.MemberTokenFilter;
 import com.killerplay13.tripcollab.service.WalletCommandService;
 import com.killerplay13.tripcollab.service.WalletQueryService;
+import com.killerplay13.tripcollab.wallet.dto.TotalsInBaseDto;
+import com.killerplay13.tripcollab.wallet.dto.WalletBalanceDto;
 import com.killerplay13.tripcollab.wallet.dto.WalletDepositRequest;
 import com.killerplay13.tripcollab.wallet.dto.WalletSummaryResponse;
 import com.killerplay13.tripcollab.wallet.dto.WalletTransactionListResponse;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -148,7 +151,19 @@ class WalletControllerTest {
     UUID memberId = UUID.randomUUID();
 
     when(walletQueryService.getSummary(tripId))
-        .thenReturn(new WalletSummaryResponse(1L, tripId, "TWD", List.of(), null, java.time.Instant.now()));
+        .thenReturn(new WalletSummaryResponse(
+            1L,
+            tripId,
+            "TWD",
+            List.of(new WalletBalanceDto("TWD", new BigDecimal("1000.00"))),
+            new TotalsInBaseDto(
+                new BigDecimal("1000.00"),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO
+            ),
+            Instant.now()
+        ));
 
     mvc.perform(get("/api/trips/{tripId}/wallet", tripId)
             .requestAttr(MemberTokenFilter.ATTR_MEMBER_ID, memberId)
